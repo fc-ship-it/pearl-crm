@@ -138,6 +138,29 @@ export async function sendTrialEndedEmail(info: { contactEmail: string; orgName:
   );
 }
 
+// Sent when Stripe couldn't charge a renewal (card expired, insufficient
+// funds, etc). Stripe itself keeps retrying for a while (Smart Retries)
+// before the subscription is actually canceled, so this just points the
+// customer at updating their card — see /api/billing/stripe/portal.
+export async function sendPaymentFailedEmail(info: { contactEmail: string; orgName: string }) {
+  const url = appUrl();
+  await sendEmail(
+    info.contactEmail,
+    "Pearl — your last payment didn't go through",
+    [
+      `Hi,`,
+      ``,
+      `We tried to charge the card on file for ${info.orgName}'s Pearl subscription and it didn't go through.`,
+      ``,
+      `Update your card to keep access: ${url}/app/settings/billing`,
+      ``,
+      `We'll automatically retry a few more times before anything is paused — no data is ever deleted.`,
+      ``,
+      `— The Pearl team`,
+    ].join("\n")
+  );
+}
+
 // Sent once an org's grace period has actually run out and access has been
 // suspended.
 export async function sendSuspendedEmail(info: { contactEmail: string; orgName: string }) {

@@ -6,11 +6,11 @@ import { Plus, X } from "lucide-react";
 const FAQS = [
   {
     q: "Am I charged anything during the trial?",
-    a: "No. You start the free trial without entering any payment details in this demo version. In production, even if requested, nothing is charged before the trial days are up.",
+    a: "No. A card is required to start the trial, but nothing is charged for the full 7 days. If you cancel before day 7, you're never billed.",
   },
   {
     q: "How does the free trial work?",
-    a: "You get 7 days to use the platform with real data. If it's not for you, you simply don't activate a paid plan.",
+    a: "You get 7 days to use the platform with real data. If you don't cancel before the trial ends, your card is automatically charged for the plan you picked at signup — you can cancel any time from Settings.",
   },
   {
     q: "Are there any hidden costs?",

@@ -501,7 +501,10 @@ export function saveIntegrationCredentials(
   }
 }
 
-export type SubscriptionStatus = "trialing" | "active" | "past_due" | "suspended";
+/** `incomplete` is a new-signup org that hasn't finished Stripe Checkout yet
+ * (card not confirmed) — blocked from /app/* exactly like `suspended`, see
+ * isAccessBlocked below. Every other status is unchanged. */
+export type SubscriptionStatus = "incomplete" | "trialing" | "active" | "past_due" | "suspended";
 
 export type Organization = {
   id: string;
@@ -517,6 +520,9 @@ export type Organization = {
   pending_payment_intent_id: string | null;
   pending_interval: BillingIntervalId | null;
   last_applied_payment_intent_id: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  stripe_cancel_at_period_end: number;
 };
 
 export function getOrganization(orgId: string): Organization | undefined {
@@ -539,11 +545,66 @@ export function getOrgBillingContactEmail(orgId: string): string | null {
 
 /** Whether /app/* should redirect to the renewal screen. A `past_due` org
  * (period — or trial — over, still inside its grace window) keeps full
- * access; only `suspended` blocks it. A `trialing` org is only moved to
- * `past_due` once its trial actually expires (see listTrialsToExpire in
- * the daily cron sweep), so access is never blocked mid-trial. */
+ * access; `suspended` blocks it, and so does `incomplete` (a brand-new
+ * signup that hasn't finished Stripe Checkout, so no trial has actually
+ * started yet). A `trialing` org is only moved to `past_due` once its trial
+ * actually expires (see listTrialsToExpire in the daily cron sweep), so
+ * access is never blocked mid-trial. */
 export function isAccessBlocked(org: Organization): boolean {
-  return org.subscription_status === "suspended";
+  return org.subscription_status === "suspended" || org.subscription_status === "incomplete";
+}
+
+/** Applies a normalized Stripe subscription (see src/lib/stripe.ts) to an
+ * org row — the single write path used by the Checkout success redirect
+ * (api/billing/stripe/confirm) AND the webhook, so whichever one lands
+ * first "wins" and the other is just a harmless repeat of the same write.
+ * Unlike the old Ziina flow this never stacks a period length onto the
+ * org's own clock — Stripe is the source of truth for the period end. */
+export function applyStripeSubscription(
+  orgId: string,
+  sub: {
+    customerId: string;
+    subscriptionId: string;
+    status: SubscriptionStatus;
+    intervalId: BillingIntervalId | null;
+    periodEndIso: string | null;
+    cancelAtPeriodEnd: boolean;
+  }
+) {
+  db.prepare(
+    `UPDATE organizations SET
+       stripe_customer_id = ?,
+       stripe_subscription_id = ?,
+       subscription_status = ?,
+       billing_interval = COALESCE(?, billing_interval),
+       plan = COALESCE(?, plan),
+       billing_period_end = COALESCE(?, billing_period_end),
+       stripe_cancel_at_period_end = ?
+     WHERE id = ?`
+  ).run(
+    sub.customerId,
+    sub.subscriptionId,
+    sub.status,
+    sub.intervalId,
+    sub.intervalId,
+    sub.periodEndIso,
+    sub.cancelAtPeriodEnd ? 1 : 0,
+    orgId
+  );
+}
+
+/** An org whose subscription is entirely Stripe-managed (has a
+ * stripe_subscription_id) is excluded from the legacy manual grace/suspend
+ * sweep below — Stripe's own webhooks (customer.subscription.updated/
+ * deleted, via applyStripeSubscription) are the sole source of truth for
+ * those orgs' status. The legacy sweep still applies to: orgs that signed
+ * up before this Stripe migration and are still on a card-less trial, and
+ * orgs given a plan manually from the Owner Dashboard (bank transfer /
+ * cash — see grantManualPlan), neither of which has a Stripe subscription. */
+export function findOrgByStripeSubscriptionId(subscriptionId: string): Organization | undefined {
+  return db.prepare("SELECT * FROM organizations WHERE stripe_subscription_id = ?").get(subscriptionId) as
+    | Organization
+    | undefined;
 }
 
 /** Kicks off a renewal/upgrade: remembers which Ziina payment intent is in
@@ -597,7 +658,8 @@ export function listOrgsToMoveToGrace(): Organization[] {
   const rows = db
     .prepare(
       `SELECT * FROM organizations
-       WHERE subscription_status = 'active' AND billing_period_end IS NOT NULL AND billing_period_end < ?`
+       WHERE subscription_status = 'active' AND billing_period_end IS NOT NULL AND billing_period_end < ?
+         AND stripe_subscription_id IS NULL`
     )
     .all(new Date().toISOString());
   return rows as Organization[];
@@ -623,7 +685,11 @@ export function listTrialsToExpire(): Organization[] {
 
 export function listOrgsToSuspend(): Organization[] {
   const rows = db
-    .prepare(`SELECT * FROM organizations WHERE subscription_status = 'past_due' AND grace_until IS NOT NULL AND grace_until < ?`)
+    .prepare(
+      `SELECT * FROM organizations
+       WHERE subscription_status = 'past_due' AND grace_until IS NOT NULL AND grace_until < ?
+         AND stripe_subscription_id IS NULL`
+    )
     .all(new Date().toISOString());
   return rows as Organization[];
 }

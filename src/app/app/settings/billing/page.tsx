@@ -1,8 +1,8 @@
 import { getSession } from "@/lib/auth";
-import { getOrganization, applyCompletedPayment } from "@/lib/data";
-import { getPaymentIntent, ZiinaNotConfiguredError } from "@/lib/ziina";
-import { formatDate, BILLING_PLANS, billingPlanConfig, BILLING_GRACE_DAYS } from "@/lib/domain";
+import { getOrganization } from "@/lib/data";
+import { formatDate, BILLING_PLANS, billingPlanConfig } from "@/lib/domain";
 import SubscribeButton from "@/components/SubscribeButton";
+import ManageBillingButton from "@/components/ManageBillingButton";
 import { Check, CheckCircle2, AlertTriangle, Info } from "lucide-react";
 
 // One product, no feature tiers — every plan includes full, unlimited access.
@@ -20,49 +20,27 @@ type PaymentMessage = { kind: "success" | "error" | "info"; text: string };
 export default async function BillingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ paid?: string; canceled?: string; failed?: string }>;
+  searchParams: Promise<{ paid?: string; canceled?: string }>;
 }) {
   const session = await getSession();
   const sp = await searchParams;
-  let org = getOrganization(session!.orgId)!;
-  let message: PaymentMessage | null = null;
+  const org = getOrganization(session!.orgId)!;
 
-  // Ziina has no server-to-server guarantee tighter than this on the
-  // success redirect itself, so re-check the payment intent's real status
-  // with Ziina before crediting anything — never trust the redirect alone.
-  // (The webhook in /api/billing/webhook is the other, independent path to
-  // the same applyCompletedPayment call, for the case where the customer
-  // closes the tab before this page loads.)
-  if (sp.paid === "1" && org.pending_payment_intent_id) {
-    try {
-      const intent = await getPaymentIntent(org.pending_payment_intent_id);
-      if (intent.status === "completed") {
-        applyCompletedPayment(org.id, org.pending_payment_intent_id);
-        org = getOrganization(org.id)!;
-        message = { kind: "success", text: "Payment received — your plan is active." };
-      } else if (intent.status === "failed" || intent.status === "canceled") {
-        message = { kind: "error", text: "The payment wasn't completed. You can try again below." };
-      } else {
-        message = { kind: "info", text: "Payment is still processing — refresh this page in a moment." };
-      }
-    } catch (err) {
-      message = {
-        kind: "error",
-        text:
-          err instanceof ZiinaNotConfiguredError
-            ? "Payments aren't connected yet — contact support."
-            : "Couldn't verify the payment just now. If you were charged, it will apply automatically shortly.",
-      };
-    }
+  // By the time this page renders, /api/billing/stripe/confirm has already
+  // synchronously reconciled the org's row with Stripe (see that route) —
+  // no need to re-check a payment intent's status here like the old Ziina
+  // page did. These query params are just which banner to show.
+  let message: PaymentMessage | null = null;
+  if (sp.paid === "1") {
+    message = { kind: "success", text: "Payment received — your plan is active." };
   } else if (sp.canceled === "1") {
     message = { kind: "info", text: "Checkout canceled — you weren't charged." };
-  } else if (sp.failed === "1") {
-    message = { kind: "error", text: "The payment failed. You can try again below." };
   }
 
   const activePlan = billingPlanConfig(org.billing_interval);
   const isTrial = org.subscription_status === "trialing";
   const isPastDue = org.subscription_status === "past_due";
+  const hasStripeAccount = !!org.stripe_customer_id;
 
   return (
     <div className="max-w-[1100px]">
@@ -115,14 +93,21 @@ export default async function BillingPage({
         {!isTrial && org.billing_period_end && (
           <div className="text-sm text-right" style={{ color: "var(--ink-dim)" }}>
             {isPastDue ? (
+              <span style={{ color: "var(--warning)" }}>Payment failed — we'll retry automatically. Update your card below if needed.</span>
+            ) : org.stripe_cancel_at_period_end ? (
               <span style={{ color: "var(--warning)" }}>
-                Payment due — renew within {org.grace_until ? formatDate(org.grace_until) : `${BILLING_GRACE_DAYS} days`} to keep access
+                Cancels on <span style={{ color: "var(--gold)" }}>{formatDate(org.billing_period_end)}</span> — access continues until then.
               </span>
             ) : (
               <>
                 Renews on <span style={{ color: "var(--gold)" }}>{formatDate(org.billing_period_end)}</span>
               </>
             )}
+          </div>
+        )}
+        {hasStripeAccount && (
+          <div>
+            <ManageBillingButton />
           </div>
         )}
       </div>
@@ -155,16 +140,18 @@ export default async function BillingPage({
                 </li>
               ))}
             </ul>
-            <SubscribeButton interval={p.id} label={`AED ${p.amountAed}${p.period}`} highlighted={p.highlighted} />
+            {activePlan?.id === p.id && !isTrial ? (
+              hasStripeAccount && <ManageBillingButton label="Change or cancel" />
+            ) : (
+              <SubscribeButton interval={p.id} label={`AED ${p.amountAed}${p.period}`} highlighted={p.highlighted} />
+            )}
           </div>
         ))}
       </div>
 
       <p className="text-xs mt-6" style={{ color: "var(--ink-dim)" }}>
-        Payments are processed by Ziina. Ziina doesn't yet support silently charging a saved card again, so renewal
-        works like this: a fresh payment link is generated and emailed automatically the moment a paid period ends,
-        with {BILLING_GRACE_DAYS} days of grace before access pauses — nothing is ever deleted while paused. See
-        ZIINA_INTEGRATION.md for the full design.
+        Payments are processed securely by Stripe. Your card is charged automatically at the end of the trial and on
+        each renewal — cancel any time from "Manage billing" above and you won't be charged again.
       </p>
     </div>
   );

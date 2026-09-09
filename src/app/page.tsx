@@ -92,7 +92,7 @@ export default function LandingPage() {
             <div className="flex text-[13px]" style={{ color: "var(--gold)" }}>
               {"★★★★★"}
             </div>
-            <span>Built on the AHEAD LLC AI-first method · no card required for the demo</span>
+            <span>Built on the AHEAD LLC AI-first method</span>
           </div>
         </div>
         <div className="relative z-10 fade-up fade-up-delay-1">
@@ -230,7 +230,7 @@ export default function LandingPage() {
             7 days
           </div>
           <p className="text-sm mb-5" style={{ color: "var(--ink-dim)" }}>
-            No card required in this demo.
+            Card required to start — cancel any time before day 7 and you won't be charged.
           </p>
           <Link
             href="/signup"

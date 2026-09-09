@@ -29,10 +29,12 @@ export default async function BillingRequiredPage() {
         <div className="text-center mb-6">
           <PauseCircle size={32} color="var(--warning)" className="mx-auto mb-3" />
           <h1 className="font-display text-xl" style={{ color: "var(--ink)" }}>
-            {org.name}'s Pearl access is paused
+            {org.subscription_status === "incomplete" ? `Finish setting up ${org.name}'s Pearl account` : `${org.name}'s Pearl access is paused`}
           </h1>
           <p className="text-sm mt-2" style={{ color: "var(--ink-dim)" }}>
-            Nothing was deleted — pick a plan below and you're back in immediately after payment.
+            {org.subscription_status === "incomplete"
+              ? "Your signup wasn't finished — pick a plan below to add a card and start your 7-day free trial."
+              : "Nothing was deleted — pick a plan below and you're back in immediately after payment."}
           </p>
         </div>
 

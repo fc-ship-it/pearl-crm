@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -13,7 +12,6 @@ function SignupForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,14 +22,16 @@ function SignupForm() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ orgName, name, email, password }),
     });
-    setLoading(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.redirect_url) {
+      setLoading(false);
       setError(data.error || "Something went wrong while signing up.");
       return;
     }
-    router.push("/app/dashboard");
-    router.refresh();
+    // Off to Stripe Checkout to add a card — the account already exists and
+    // is logged in, but stays locked (see isAccessBlocked) until Checkout
+    // confirms the card, which is when the 7-day trial actually starts.
+    window.location.href = data.redirect_url;
   }
 
   const inputStyle = { background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" } as const;
@@ -51,7 +51,7 @@ function SignupForm() {
               7-day free trial
             </h1>
             <p className="text-xs mt-1" style={{ color: "var(--ink-dim)" }}>
-              No card required for this MVP demo.
+              A card is required to start — you won't be charged until the trial ends, and you can cancel any time before then.
             </p>
           </div>
           <div>
@@ -84,7 +84,7 @@ function SignupForm() {
             </p>
           )}
           <button type="submit" disabled={loading} className="w-full py-2.5 rounded-xl text-sm font-medium disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
-            {loading ? "Creating account…" : "Start free trial"}
+            {loading ? "Redirecting to secure checkout…" : "Continue to add card"}
           </button>
         </form>
         <p className="text-center text-sm mt-4" style={{ color: "var(--ink-dim)" }}>

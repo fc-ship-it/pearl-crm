@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { BillingIntervalId } from "@/lib/domain";
 
-/** Kicks off a Ziina checkout for one plan and redirects the browser to the
+/** Kicks off a Stripe Checkout for one plan and redirects the browser to the
  * hosted payment page. Used on both the Plan & Billing settings page and
  * the /billing-required screen a suspended org lands on. */
 export default function SubscribeButton({
@@ -22,7 +22,7 @@ export default function SubscribeButton({
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/billing/checkout", {
+      const res = await fetch("/api/billing/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ interval }),
@@ -48,7 +48,7 @@ export default function SubscribeButton({
         className="w-full text-xs px-3 py-2.5 rounded-lg disabled:opacity-60"
         style={highlighted ? { background: "var(--gold)", color: "var(--ink)" } : { border: "1px solid var(--border)", color: "var(--ink)" }}
       >
-        {loading ? "Redirecting to Ziina…" : `Subscribe — ${label}`}
+        {loading ? "Redirecting to secure checkout…" : `Subscribe — ${label}`}
       </button>
       {error && (
         <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>
