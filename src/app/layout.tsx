@@ -1,8 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
+// A custom `viewport` export replaces Next's default entirely — it does NOT
+// merge with it — so omitting width/initialScale here (as this only had
+// themeColor before) means mobile browsers get no viewport meta tag at all
+// and render the page at desktop width, then scale it down to fit. That's
+// almost certainly why the installed phone app looked "not optimized at
+// all": everything tiny, pinch-to-zoom required, no responsive behavior.
 export const viewport: Viewport = {
   themeColor: "#151b2e",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export const metadata: Metadata = {

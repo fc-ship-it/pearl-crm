@@ -13,9 +13,12 @@ export function appUrl(): string {
 
 async function sendEmail(to: string, subject: string, text: string): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return;
+  if (!apiKey) {
+    console.warn(`[notify] RESEND_API_KEY not set — skipped email "${subject}" to ${to}`);
+    return;
+  }
   try {
-    await fetch("https://api.resend.com/emails", {
+    const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -28,8 +31,21 @@ async function sendEmail(to: string, subject: string, text: string): Promise<voi
         text,
       }),
     });
-  } catch {
-    // Best-effort only — never let an email failure break the caller's flow.
+    if (!res.ok) {
+      // This used to be swallowed completely — the single most common cause
+      // is Resend's sandbox sender (onboarding@resend.dev, used whenever
+      // RESEND_FROM_EMAIL isn't set) refusing to deliver to anyone except
+      // the Resend account's own verified email, with a 403 and a message
+      // like "You can only send testing emails to your own email address."
+      // Logging it here means Netlify's function logs actually show *why*
+      // an email never arrived, instead of nothing at all. Fix: verify a
+      // sending domain in Resend (Domains → Add Domain) and set
+      // RESEND_FROM_EMAIL to an address on it, e.g. "Pearl <noreply@your-domain.com>".
+      const body = await res.text().catch(() => "");
+      console.error(`[notify] Resend rejected email "${subject}" to ${to}: ${res.status} ${body}`);
+    }
+  } catch (err) {
+    console.error(`[notify] Failed to reach Resend for email "${subject}" to ${to}`, err);
   }
 }
 

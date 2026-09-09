@@ -40,6 +40,11 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
   function applyScan(text: string) {
     const payload = classifyQrPayload(text);
     setScannerOpen(false);
+    // Scanning switches to the manual tab pre-filled and expects a manual
+    // "Confirm & save" tap to finish — without this scroll, that banner and
+    // button can land off-screen (especially on mobile) and look like the
+    // scan silently did nothing.
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
     if (payload.kind === "vcard") {
       const c = payload.contact;
       setDraft((d) => ({ ...d, name: c.name, email: c.email || d.email, phone: c.phone || d.phone, companyName: c.org || d.companyName, source: "qr" }));
@@ -87,7 +92,7 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
 
   return (
     <div>
-      <div className="flex gap-1 mb-5 p-1 rounded-xl" style={{ background: "var(--panel-2)", width: "fit-content" }}>
+      <div className="flex gap-1 mb-5 p-1 rounded-xl overflow-x-auto max-w-full" style={{ background: "var(--panel-2)", width: "fit-content" }}>
         <TabButton active={tab === "manual"} onClick={() => setTab("manual")} icon={<UserPlus size={14} />} label="Manual entry" />
         <TabButton active={tab === "qr"} onClick={() => setTab("qr")} icon={<QrCode size={14} />} label="Scan QR code" />
         <TabButton active={tab === "import"} onClick={() => setTab("import")} icon={<Upload size={14} />} label="Import from phone" />
@@ -104,7 +109,7 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
 
       {tab === "manual" && (
         <form onSubmit={submitManual} className="card p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                 Full name *
@@ -123,7 +128,7 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
               </datalist>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                 Email
@@ -142,7 +147,7 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
             <div className="text-xs mb-3" style={{ color: "var(--ink-dim)" }}>
               Lead qualification
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                   Interest
@@ -181,8 +186,13 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
               {error}
             </p>
           )}
-          <button type="submit" disabled={saving} className="px-5 py-2.5 rounded-xl text-sm font-medium disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
-            {saving ? "Saving…" : "Save contact"}
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-medium disabled:opacity-60"
+            style={{ background: "var(--gold)", color: "var(--ink)" }}
+          >
+            {saving ? "Saving…" : scanNote ? "Confirm & save this contact" : "Save contact"}
           </button>
         </form>
       )}
@@ -213,7 +223,7 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
+      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap shrink-0"
       style={active ? { background: "var(--panel)", color: "var(--ink)", boxShadow: "0 1px 2px rgba(36,19,64,0.08)" } : { color: "var(--ink-dim)" }}
       type="button"
     >
@@ -230,6 +240,7 @@ function ImportTab({ companyNames }: { companyNames: string[] }) {
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null);
   const [parseError, setParseError] = useState("");
+  const [importError, setImportError] = useState("");
 
   function handleFile(file: File) {
     setResult(null);
@@ -254,26 +265,37 @@ function ImportTab({ companyNames }: { companyNames: string[] }) {
     const toImport = parsed.filter((_, i) => selected[i]);
     if (toImport.length === 0) return;
     setImporting(true);
-    const res = await fetch("/api/contacts/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contacts: toImport.map((c) => ({
-          name: c.name,
-          email: c.email,
-          phone: c.phone,
-          companyName: c.org,
-          targetSegment: batchTargetSegment || null,
-          budgetTier: batchBudgetTier || null,
-          source: "import",
-        })),
-      }),
-    });
-    setImporting(false);
-    if (res.ok) {
-      const data = await res.json();
+    setImportError("");
+    try {
+      const res = await fetch("/api/contacts/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contacts: toImport.map((c) => ({
+            name: c.name,
+            email: c.email,
+            phone: c.phone,
+            companyName: c.org,
+            targetSegment: batchTargetSegment || null,
+            budgetTier: batchBudgetTier || null,
+            source: "import",
+          })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setImporting(false);
+      if (!res.ok) {
+        // Previously this branch didn't exist at all — a failed request
+        // (session expired, server error) just silently did nothing, which
+        // looks exactly like "import doesn't work" with zero explanation.
+        setImportError(data.error || "Something went wrong while importing. Please try again.");
+        return;
+      }
       setResult({ imported: data.imported, skipped: data.skipped });
       setParsed([]);
+    } catch {
+      setImporting(false);
+      setImportError("Couldn't reach the server. Check your connection and try again.");
     }
   }
 
@@ -337,7 +359,7 @@ function ImportTab({ companyNames }: { companyNames: string[] }) {
             ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
             <div>
               <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                 Tag all imported contacts — target segment
@@ -364,9 +386,14 @@ function ImportTab({ companyNames }: { companyNames: string[] }) {
             </div>
           </div>
 
-          <button onClick={doImport} disabled={importing || selectedCount === 0} className="px-5 py-2.5 rounded-xl text-sm font-medium disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
+          <button onClick={doImport} disabled={importing || selectedCount === 0} className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-medium disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
             {importing ? "Importing…" : `Import ${selectedCount} contact${selectedCount === 1 ? "" : "s"}`}
           </button>
+          {importError && (
+            <p className="text-xs mt-3 flex items-center gap-2" style={{ color: "var(--danger)" }}>
+              <AlertTriangle size={13} /> {importError}
+            </p>
+          )}
         </>
       )}
 

@@ -127,7 +127,7 @@ function CampaignsPanel({ campaigns, segments }: { campaigns: Campaign[]; segmen
 
       {showForm && (
         <form onSubmit={createCampaign} className="card p-5 mb-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                 Campaign title
@@ -158,7 +158,7 @@ function CampaignsPanel({ campaigns, segments }: { campaigns: Campaign[]; segmen
             <div className="text-xs mb-2" style={{ color: "var(--ink-dim)" }}>
               Target audience — leave blank to match everyone
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <input value={interest} onChange={(e) => setInterest(e.target.value)} placeholder="Interest contains…" className="px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
               <select value={budgetTier} onChange={(e) => setBudgetTier(e.target.value)} className="px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle}>
                 <option value="">Any budget</option>
@@ -317,7 +317,7 @@ function AlertsPanel({ alerts, contacts }: { alerts: CustomAlert[]; contacts: { 
       {showForm && (
         <form onSubmit={createAlert} className="card p-4 mb-3 space-y-2">
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Remind me to…" className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <select value={kind} onChange={(e) => setKind(e.target.value as "general" | "call" | "appointment")} className="px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle}>
               {Object.entries(ALERT_KIND_META).map(([id, meta]) => (
                 <option key={id} value={id}>
