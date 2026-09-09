@@ -6,9 +6,10 @@ import {
   suspendOrg,
   setPendingPaymentIntent,
   getOrgBillingContactEmail,
+  listTrialsToExpire,
 } from "@/lib/data";
 import { createPaymentIntent, ZiinaNotConfiguredError } from "@/lib/ziina";
-import { sendRenewalEmail, sendSuspendedEmail, appUrl } from "@/lib/notify";
+import { sendRenewalEmail, sendSuspendedEmail, sendTrialEndedEmail, appUrl } from "@/lib/notify";
 import { BILLING_PLANS, BILLING_GRACE_DAYS } from "@/lib/domain";
 
 export const runtime = "nodejs";
@@ -32,8 +33,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const results = { movedToGrace: 0, renewalEmailsSent: 0, suspended: 0, errors: [] as string[] };
+  const results = {
+    movedToGrace: 0,
+    renewalEmailsSent: 0,
+    trialsEnded: 0,
+    suspended: 0,
+    errors: [] as string[],
+  };
   const url = appUrl();
+
+  // Trials that ran out with no plan ever chosen — same past_due/grace
+  // pipeline as a lapsed paid plan (moveOrgToGrace / listOrgsToSuspend
+  // below pick these up the same way), just with a "pick a plan" email
+  // instead of a specific renewal link since no plan/amount exists yet.
+  for (const org of listTrialsToExpire()) {
+    moveOrgToGrace(org.id);
+    results.trialsEnded++;
+    const email = getOrgBillingContactEmail(org.id);
+    if (email) {
+      await sendTrialEndedEmail({ contactEmail: email, orgName: org.name, graceDays: BILLING_GRACE_DAYS });
+    }
+  }
 
   for (const org of listOrgsToMoveToGrace()) {
     moveOrgToGrace(org.id);

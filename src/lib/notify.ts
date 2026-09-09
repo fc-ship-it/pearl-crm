@@ -116,6 +116,28 @@ export async function sendRenewalEmail(info: {
   );
 }
 
+// Sent once when the free trial itself runs out with no plan ever chosen —
+// unlike sendRenewalEmail there's no specific plan/amount to point at yet
+// (the customer hasn't picked one), so this just points at the pricing page.
+export async function sendTrialEndedEmail(info: { contactEmail: string; orgName: string; graceDays: number }) {
+  const url = appUrl();
+  await sendEmail(
+    info.contactEmail,
+    "Pearl — your free trial has ended",
+    [
+      `Hi,`,
+      ``,
+      `${info.orgName}'s 7-day free trial on Pearl has ended.`,
+      ``,
+      `Choose a plan to keep going (weekly, monthly or annual): ${url}/app/settings/billing`,
+      ``,
+      `You have ${info.graceDays} day${info.graceDays === 1 ? "" : "s"} before access pauses — no data is deleted, and everything picks back up the moment you subscribe.`,
+      ``,
+      `— The Pearl team`,
+    ].join("\n")
+  );
+}
+
 // Sent once an org's grace period has actually run out and access has been
 // suspended.
 export async function sendSuspendedEmail(info: { contactEmail: string; orgName: string }) {

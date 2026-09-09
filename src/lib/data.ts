@@ -537,12 +537,11 @@ export function getOrgBillingContactEmail(orgId: string): string | null {
   return row?.email ?? null;
 }
 
-/** Whether the org's trial has run out and no paid period covers it — i.e.
- * whether /app/* should redirect to the renewal screen. A `past_due` org
- * (period over, still inside its grace window) keeps full access; only
- * `suspended` blocks it. Trial itself is never blocked here — that only
- * starts once `subscription_status` actually flips to `suspended` by the
- * scheduled renewal check (see checkBillingRenewals). */
+/** Whether /app/* should redirect to the renewal screen. A `past_due` org
+ * (period — or trial — over, still inside its grace window) keeps full
+ * access; only `suspended` blocks it. A `trialing` org is only moved to
+ * `past_due` once its trial actually expires (see listTrialsToExpire in
+ * the daily cron sweep), so access is never blocked mid-trial. */
 export function isAccessBlocked(org: Organization): boolean {
   return org.subscription_status === "suspended";
 }
@@ -607,6 +606,19 @@ export function listOrgsToMoveToGrace(): Organization[] {
 export function moveOrgToGrace(orgId: string) {
   const graceUntil = new Date(Date.now() + BILLING_GRACE_DAYS * 24 * 3600 * 1000).toISOString();
   db.prepare("UPDATE organizations SET subscription_status = 'past_due', grace_until = ? WHERE id = ?").run(graceUntil, orgId);
+}
+
+/** Orgs whose free trial has simply run out with no plan ever chosen — a
+ * separate case from a paid period ending, since there's no billing_period_end
+ * to compare against. Feeds into the exact same past_due/grace pipeline as a
+ * lapsed paid plan (moveOrgToGrace / listOrgsToSuspend), so "the trial ended"
+ * and "the subscription lapsed" both resolve the same way: a few days of
+ * grace, then /billing-required. */
+export function listTrialsToExpire(): Organization[] {
+  const rows = db
+    .prepare(`SELECT * FROM organizations WHERE subscription_status = 'trialing' AND trial_ends_at < ?`)
+    .all(new Date().toISOString());
+  return rows as Organization[];
 }
 
 export function listOrgsToSuspend(): Organization[] {
