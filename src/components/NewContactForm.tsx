@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { UserPlus, QrCode, Upload, CheckCircle2, AlertTriangle } from "lucide-react";
 import { BUDGET_TIERS, TARGET_SEGMENT_SUGGESTIONS } from "@/lib/domain";
@@ -109,7 +109,7 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
 
       {tab === "manual" && (
         <form onSubmit={submitManual} className="card p-6 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div>
               <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                 Full name *
@@ -128,7 +128,7 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
               </datalist>
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div>
               <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                 Email
@@ -147,7 +147,7 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
             <div className="text-xs mb-3" style={{ color: "var(--ink-dim)" }}>
               Lead qualification
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <div>
                 <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                   Interest
@@ -232,6 +232,16 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
   );
 }
 
+// The Contact Picker API (navigator.contacts.select) is what lets this be a
+// single tap → the phone's own native "choose contacts" screen → done, with
+// no file export step. It's currently Chrome-on-Android only (not iOS
+// Safari, not desktop) — https://developer.mozilla.org/en-US/docs/Web/API/Contact_Picker_API
+// — so it's offered as the primary path where the browser supports it, and
+// the vCard-file flow below stays as the fallback everywhere else.
+type ContactsManager = {
+  select: (props: string[], opts?: { multiple?: boolean }) => Promise<Array<{ name?: string[]; email?: string[]; tel?: string[] }>>;
+};
+
 function ImportTab({ companyNames }: { companyNames: string[] }) {
   const [parsed, setParsed] = useState<ParsedContact[]>([]);
   const [selected, setSelected] = useState<Record<number, boolean>>({});
@@ -241,29 +251,28 @@ function ImportTab({ companyNames }: { companyNames: string[] }) {
   const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null);
   const [parseError, setParseError] = useState("");
   const [importError, setImportError] = useState("");
+  const [pickerSupported, setPickerSupported] = useState(false);
+  const [picking, setPicking] = useState(false);
 
-  function handleFile(file: File) {
-    setResult(null);
-    setParseError("");
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result || "");
-      const contacts = parseVCardFile(text);
-      if (contacts.length === 0) {
-        setParseError("No contacts found in that file. Make sure it's a vCard (.vcf) export.");
-        return;
-      }
-      setParsed(contacts);
-      const initialSelected: Record<number, boolean> = {};
-      contacts.forEach((_, i) => (initialSelected[i] = true));
-      setSelected(initialSelected);
-    };
-    reader.readAsText(file);
+  useEffect(() => {
+    setPickerSupported(typeof navigator !== "undefined" && "contacts" in navigator && "ContactsManager" in window);
+  }, []);
+
+  function loadParsed(contacts: ParsedContact[]) {
+    setParsed(contacts);
+    const initialSelected: Record<number, boolean> = {};
+    contacts.forEach((_, i) => (initialSelected[i] = true));
+    setSelected(initialSelected);
   }
 
-  async function doImport() {
-    const toImport = parsed.filter((_, i) => selected[i]);
-    if (toImport.length === 0) return;
+  // Shared by both entry points — the native phone picker already IS a
+  // selection step (the person chose exactly who they want in their OS's
+  // own picker UI), so that path skips straight to importing everything
+  // picked with no second "review and select" screen in between: pick →
+  // done. The vCard-file path still shows the review/select screen below,
+  // since a phone's full address-book export can be large and unfiltered.
+  async function runImport(contacts: ParsedContact[]) {
+    if (contacts.length === 0) return;
     setImporting(true);
     setImportError("");
     try {
@@ -271,7 +280,7 @@ function ImportTab({ companyNames }: { companyNames: string[] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contacts: toImport.map((c) => ({
+          contacts: contacts.map((c) => ({
             name: c.name,
             email: c.email,
             phone: c.phone,
@@ -299,43 +308,135 @@ function ImportTab({ companyNames }: { companyNames: string[] }) {
     }
   }
 
+  async function pickFromPhone() {
+    setParseError("");
+    setPicking(true);
+    try {
+      const manager = (navigator as unknown as { contacts: ContactsManager }).contacts;
+      const picked = await manager.select(["name", "email", "tel"], { multiple: true });
+      setPicking(false);
+      if (picked.length === 0) return; // user opened the picker and selected nothing — not an error
+      const contacts: ParsedContact[] = picked.map((c) => ({
+        name: c.name?.[0] || c.tel?.[0] || c.email?.[0] || "Unnamed contact",
+        email: c.email?.[0] || null,
+        phone: c.tel?.[0] || null,
+        org: null,
+      }));
+      // "select all and fly them in" — every contact chosen in the native
+      // picker is imported immediately, no extra confirmation tap.
+      await runImport(contacts);
+    } catch (err) {
+      setPicking(false);
+      // AbortError = the person canceled the native picker — not a real error.
+      if (err instanceof Error && err.name === "AbortError") return;
+      setParseError("Couldn't open your phone's contacts. You can still import via a vCard file below.");
+    }
+  }
+
+  function handleFile(file: File) {
+    setResult(null);
+    setParseError("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const contacts = parseVCardFile(text);
+      if (contacts.length === 0) {
+        setParseError("No contacts found in that file. Make sure it's a vCard (.vcf) export.");
+        return;
+      }
+      loadParsed(contacts);
+    };
+    reader.readAsText(file);
+  }
+
+  async function doImport() {
+    const toImport = parsed.filter((_, i) => selected[i]);
+    await runImport(toImport);
+  }
+
   const selectedCount = Object.values(selected).filter(Boolean).length;
 
   return (
     <div className="card p-6">
       {parsed.length === 0 && !result && (
         <>
-          <Upload size={28} color="var(--gold)" className="mb-3" />
-          <p className="text-sm mb-1" style={{ color: "var(--ink)" }}>
-            Import contacts from Android or iPhone
-          </p>
-          <p className="text-xs mb-4" style={{ color: "var(--ink-dim)" }}>
-            Export your phone's contacts as a vCard (.vcf) file, then upload it here:
-          </p>
-          <ul className="text-xs space-y-1 mb-5" style={{ color: "var(--ink-dim)" }}>
-            <li>
-              <b style={{ color: "var(--ink)" }}>Android:</b> Contacts app → select the contacts → ⋮ menu → Share → Export as vCard (.vcf)
-            </li>
-            <li>
-              <b style={{ color: "var(--ink)" }}>iPhone:</b> at icloud.com/contacts, select contacts → ⚙️ → Export vCard
-            </li>
-          </ul>
-          <label className="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm cursor-pointer" style={{ border: "1px solid var(--border)" }}>
-            <Upload size={14} /> Choose .vcf file
-            <input
-              type="file"
-              accept=".vcf,text/vcard,text/x-vcard"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFile(file);
-              }}
-            />
-          </label>
-          {parseError && (
-            <p className="text-xs mt-3 flex items-center gap-2" style={{ color: "var(--danger)" }}>
-              <AlertTriangle size={13} /> {parseError}
-            </p>
+          {pickerSupported ? (
+            <>
+              <Upload size={28} color="var(--gold)" className="mb-3" />
+              <p className="text-sm mb-1" style={{ color: "var(--ink)" }}>
+                Import contacts directly from your phone
+              </p>
+              <p className="text-xs mb-4" style={{ color: "var(--ink-dim)" }}>
+                One tap opens your phone's own contacts picker — choose who to import, no file export needed.
+              </p>
+              <button
+                onClick={pickFromPhone}
+                disabled={picking}
+                className="px-5 py-2.5 rounded-xl text-sm font-medium disabled:opacity-60"
+                style={{ background: "var(--gold)", color: "var(--ink)" }}
+              >
+                {picking ? "Opening your contacts…" : "Choose contacts to import"}
+              </button>
+              {parseError && (
+                <p className="text-xs mt-3 flex items-center gap-2" style={{ color: "var(--danger)" }}>
+                  <AlertTriangle size={13} /> {parseError}
+                </p>
+              )}
+              <details className="mt-5">
+                <summary className="text-xs cursor-pointer" style={{ color: "var(--ink-dim)" }}>
+                  Prefer a vCard file instead?
+                </summary>
+                <label className="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm cursor-pointer mt-3" style={{ border: "1px solid var(--border)" }}>
+                  <Upload size={14} /> Choose .vcf file
+                  <input
+                    type="file"
+                    accept=".vcf,text/vcard,text/x-vcard"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFile(file);
+                    }}
+                  />
+                </label>
+              </details>
+            </>
+          ) : (
+            <>
+              <Upload size={28} color="var(--gold)" className="mb-3" />
+              <p className="text-sm mb-1" style={{ color: "var(--ink)" }}>
+                Import contacts from Android or iPhone
+              </p>
+              <p className="text-xs mb-4" style={{ color: "var(--ink-dim)" }}>
+                Your browser doesn't support one-tap import, so export your phone's contacts as a vCard (.vcf) file and upload it here
+                instead:
+              </p>
+              <ul className="text-xs space-y-1 mb-5" style={{ color: "var(--ink-dim)" }}>
+                <li>
+                  <b style={{ color: "var(--ink)" }}>Android:</b> Contacts app → select the contacts → ⋮ menu → Share → Export as vCard
+                  (.vcf) — or open this page in Chrome for one-tap import
+                </li>
+                <li>
+                  <b style={{ color: "var(--ink)" }}>iPhone:</b> at icloud.com/contacts, select contacts → ⚙️ → Export vCard
+                </li>
+              </ul>
+              <label className="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm cursor-pointer" style={{ border: "1px solid var(--border)" }}>
+                <Upload size={14} /> Choose .vcf file
+                <input
+                  type="file"
+                  accept=".vcf,text/vcard,text/x-vcard"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFile(file);
+                  }}
+                />
+              </label>
+              {parseError && (
+                <p className="text-xs mt-3 flex items-center gap-2" style={{ color: "var(--danger)" }}>
+                  <AlertTriangle size={13} /> {parseError}
+                </p>
+              )}
+            </>
           )}
         </>
       )}
@@ -359,7 +460,7 @@ function ImportTab({ companyNames }: { companyNames: string[] }) {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
             <div>
               <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
                 Tag all imported contacts — target segment

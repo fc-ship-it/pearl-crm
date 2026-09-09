@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -16,6 +16,8 @@ import {
   BarChart3,
   Menu,
   X,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 import ReminderNotifier from "@/components/ReminderNotifier";
 
@@ -30,12 +32,16 @@ const NAV = [
   { href: "/app/settings/billing", label: "Plan & billing", icon: CreditCard },
 ];
 
+const COLLAPSE_KEY = "pearl.sidebarCollapsed";
+
 /**
- * The permanent 220px sidebar this used to always render was the main thing
- * making the installed phone app "not optimized at all" — on a ~375-430px
- * screen it left almost no room for actual content. Below the `md` breakpoint
- * it's now replaced by a slim top bar + a full-screen slide-in menu; nothing
- * changes above `md` (tablet/desktop keeps the original permanent sidebar).
+ * Below `md` this is a slim top bar + full-screen slide-in menu (see
+ * menuOpen). At `md` and above it's the permanent sidebar — but that
+ * sidebar can now also be collapsed down to an icon-only rail (~64px) with
+ * the chevron button at its bottom, so a tablet or a narrower laptop window
+ * doesn't lose most of its content width to a fully-labeled 220px sidebar.
+ * The collapsed/expanded choice is remembered per browser (localStorage) so
+ * it doesn't reset on every page navigation or reload.
  */
 export default function AppShell({
   children,
@@ -53,6 +59,28 @@ export default function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
+    } catch {
+      // localStorage can throw in some contexts (private mode, etc) — the
+      // sidebar just stays expanded by default, which is a fine fallback.
+    }
+  }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        // best-effort only
+      }
+      return next;
+    });
+  }
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -66,8 +94,8 @@ export default function AppShell({
     .slice(0, 2)
     .join("");
 
-  const navLinks = (onNavigate?: () => void) => (
-    <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
+  const navLinks = (onNavigate?: () => void, iconOnly = false) => (
+    <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto overflow-x-hidden">
       {NAV.map((item) => {
         const active = pathname.startsWith(item.href);
         const Icon = item.icon;
@@ -76,7 +104,8 @@ export default function AppShell({
             key={item.href}
             href={item.href}
             onClick={onNavigate}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition"
+            title={iconOnly ? item.label : undefined}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition ${iconOnly ? "justify-center" : ""}`}
             style={
               active
                 ? {
@@ -87,8 +116,8 @@ export default function AppShell({
                 : { color: "var(--ink-dim)" }
             }
           >
-            <Icon size={17} color={active ? "var(--gold)" : "var(--ink-dim)"} />
-            {item.label}
+            <Icon size={17} color={active ? "var(--gold)" : "var(--ink-dim)"} className="shrink-0" />
+            {!iconOnly && item.label}
           </Link>
         );
       })}
@@ -106,23 +135,39 @@ export default function AppShell({
 
   return (
     <div className="min-h-screen flex" style={{ background: "var(--bg)" }}>
-      {/* Desktop/tablet sidebar — unchanged, hidden below md */}
-      <aside className="hidden md:flex w-[220px] shrink-0 border-r flex-col" style={{ borderColor: "var(--border)" }}>
-        <div className="h-16 flex items-center gap-2 px-5 border-b" style={{ borderColor: "var(--border)" }}>
+      {/* Desktop/tablet sidebar — hidden below md, collapsible to an icon
+          rail from md upward via the chevron button at the bottom. */}
+      <aside
+        className={`hidden md:flex ${collapsed ? "w-[68px]" : "w-[220px]"} shrink-0 border-r flex-col transition-[width] duration-150`}
+        style={{ borderColor: "var(--border)" }}
+      >
+        <div className={`h-16 flex items-center gap-2 border-b shrink-0 ${collapsed ? "justify-center px-2" : "px-5"}`} style={{ borderColor: "var(--border)" }}>
           <Image src="/brand/pearl-logo-64.png" alt="" width={22} height={22} />
-          <span className="font-display text-sm tracking-wide" style={{ color: "var(--ink)" }}>
-            PEARL
-          </span>
+          {!collapsed && (
+            <span className="font-display text-sm tracking-wide" style={{ color: "var(--ink)" }}>
+              PEARL
+            </span>
+          )}
         </div>
-        {navLinks()}
-        <div className="p-3 border-t" style={{ borderColor: "var(--border)" }}>
-          {trialBadge}
+        {navLinks(undefined, collapsed)}
+        <div className={`border-t shrink-0 ${collapsed ? "p-2" : "p-3"}`} style={{ borderColor: "var(--border)" }}>
+          {!collapsed && trialBadge}
           <button
             onClick={logout}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:opacity-80"
+            title={collapsed ? "Log out" : undefined}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:opacity-80 ${collapsed ? "justify-center" : ""}`}
             style={{ color: "var(--ink-dim)" }}
           >
-            <LogOut size={16} /> Log out
+            <LogOut size={16} className="shrink-0" /> {!collapsed && "Log out"}
+          </button>
+          <button
+            onClick={toggleCollapsed}
+            title={collapsed ? "Expand menu" : "Collapse menu"}
+            className={`w-full flex items-center gap-2 px-3 py-2 mt-1 rounded-lg text-sm hover:opacity-80 ${collapsed ? "justify-center" : ""}`}
+            style={{ color: "var(--ink-dim)" }}
+          >
+            {collapsed ? <ChevronsRight size={16} className="shrink-0" /> : <ChevronsLeft size={16} className="shrink-0" />}
+            {!collapsed && "Collapse menu"}
           </button>
         </div>
       </aside>
