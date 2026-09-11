@@ -13,10 +13,10 @@ function fmtDate(iso: string) {
   }
 }
 
-export default function OwnerDashboardPage() {
-  const stats = platformStats();
-  const orgs = listAllOrganizations();
-  const users = listAllUsers();
+export default async function OwnerDashboardPage() {
+  const stats = await platformStats();
+  const orgs = await listAllOrganizations();
+  const users = await listAllUsers();
   const now = Date.now();
 
   return (

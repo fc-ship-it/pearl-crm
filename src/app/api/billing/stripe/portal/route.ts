@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const org = getOrganization(session.orgId);
+  const org = await getOrganization(session.orgId);
   if (!org?.stripe_customer_id) {
     return NextResponse.json({ error: "No billing account on file yet." }, { status: 400 });
   }

@@ -9,10 +9,10 @@ import { TrendingUp, AlertTriangle, Trophy, Percent, BellRing } from "lucide-rea
 export default async function DashboardPage() {
   const session = await getSession();
   const orgId = session!.orgId;
-  const stats = dashboardStats(orgId);
-  const tasks = listTasks(orgId, { onlyOpen: true }).slice(0, 6);
-  const meetings = listMeetings(orgId).slice(0, 3);
-  const contacts = listContacts(orgId);
+  const stats = await dashboardStats(orgId);
+  const tasks = (await listTasks(orgId, { onlyOpen: true })).slice(0, 6);
+  const meetings = (await listMeetings(orgId)).slice(0, 3);
+  const contacts = await listContacts(orgId);
 
   return (
     <div className="space-y-6 max-w-[1400px]">
@@ -196,8 +196,8 @@ function StatCard({
   );
 }
 
-function PipelineMiniBars({ orgId }: { orgId: string }) {
-  const deals: Deal[] = listDeals(orgId);
+async function PipelineMiniBars({ orgId }: { orgId: string }) {
+  const deals: Deal[] = await listDeals(orgId);
   const byStage = new Map<string, number>();
   deals.forEach((d) => byStage.set(d.stage, (byStage.get(d.stage) || 0) + d.value));
   const max = Math.max(1, ...Array.from(byStage.values()));

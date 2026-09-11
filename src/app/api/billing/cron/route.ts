@@ -46,22 +46,22 @@ export async function GET(req: NextRequest) {
   // pipeline as a lapsed paid plan (moveOrgToGrace / listOrgsToSuspend
   // below pick these up the same way), just with a "pick a plan" email
   // instead of a specific renewal link since no plan/amount exists yet.
-  for (const org of listTrialsToExpire()) {
-    moveOrgToGrace(org.id);
+  for (const org of await listTrialsToExpire()) {
+    await moveOrgToGrace(org.id);
     results.trialsEnded++;
-    const email = getOrgBillingContactEmail(org.id);
+    const email = await getOrgBillingContactEmail(org.id);
     if (email) {
       await sendTrialEndedEmail({ contactEmail: email, orgName: org.name, graceDays: BILLING_GRACE_DAYS });
     }
   }
 
-  for (const org of listOrgsToMoveToGrace()) {
-    moveOrgToGrace(org.id);
+  for (const org of await listOrgsToMoveToGrace()) {
+    await moveOrgToGrace(org.id);
     results.movedToGrace++;
 
     const interval = org.billing_interval || "monthly";
     const plan = BILLING_PLANS.find((p) => p.id === interval) || BILLING_PLANS.find((p) => p.id === "monthly")!;
-    const email = getOrgBillingContactEmail(org.id);
+    const email = await getOrgBillingContactEmail(org.id);
     if (!email) continue;
 
     try {
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
         failureUrl: `${url}/app/settings/billing?failed=1`,
       });
       if (intent.redirect_url) {
-        setPendingPaymentIntent(org.id, intent.id, plan.id);
+        await setPendingPaymentIntent(org.id, intent.id, plan.id);
         await sendRenewalEmail({
           contactEmail: email,
           orgName: org.name,
@@ -90,10 +90,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  for (const org of listOrgsToSuspend()) {
-    suspendOrg(org.id);
+  for (const org of await listOrgsToSuspend()) {
+    await suspendOrg(org.id);
     results.suspended++;
-    const email = getOrgBillingContactEmail(org.id);
+    const email = await getOrgBillingContactEmail(org.id);
     if (email) await sendSuspendedEmail({ contactEmail: email, orgName: org.name });
   }
 

@@ -6,7 +6,7 @@ import { Plus } from "lucide-react";
 
 export default async function MeetingsPage() {
   const session = await getSession();
-  const meetings = listMeetings(session!.orgId);
+  const meetings = await listMeetings(session!.orgId);
 
   return (
     <div className="max-w-[900px]">

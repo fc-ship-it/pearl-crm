@@ -17,7 +17,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (temp !== null && !VALID_TEMPERATURES.has(temp)) {
       return NextResponse.json({ error: "invalid temperature" }, { status: 400 });
     }
-    setContactTemperature(session.orgId, id, temp);
+    await setContactTemperature(session.orgId, id, temp);
   }
 
   return NextResponse.json({ ok: true });

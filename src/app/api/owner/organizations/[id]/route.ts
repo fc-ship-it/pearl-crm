@@ -24,9 +24,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!parsed.success) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
   if (parsed.data.action === "extend_trial") {
-    extendTrial(orgId, parsed.data.days ?? 14);
+    await extendTrial(orgId, parsed.data.days ?? 14);
   } else if (parsed.data.action === "grant_plan" && parsed.data.plan) {
-    grantManualPlan(orgId, parsed.data.plan as BillingIntervalId);
+    await grantManualPlan(orgId, parsed.data.plan as BillingIntervalId);
   }
   return NextResponse.json({ ok: true });
 }

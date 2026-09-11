@@ -5,9 +5,9 @@ import CampaignsBoard from "@/components/CampaignsBoard";
 export default async function CampaignsPage() {
   const session = await getSession();
   const orgId = session!.orgId;
-  const campaigns = listCampaigns(orgId);
-  const alerts = listCustomAlerts(orgId);
-  const allContacts = listContacts(orgId);
+  const campaigns = await listCampaigns(orgId);
+  const alerts = await listCustomAlerts(orgId);
+  const allContacts = await listContacts(orgId);
   const segments = Array.from(new Set(allContacts.map((c) => c.targetSegment).filter(Boolean))) as string[];
 
   return (

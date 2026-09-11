@@ -4,8 +4,8 @@ import NewMeetingForm from "@/components/NewMeetingForm";
 
 export default async function NewMeetingPage() {
   const session = await getSession();
-  const contacts = listContacts(session!.orgId);
-  const deals = listDeals(session!.orgId);
+  const contacts = await listContacts(session!.orgId);
+  const deals = await listDeals(session!.orgId);
 
   return (
     <div className="max-w-[700px]">

@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Name is required." }, { status: 400 });
   }
 
-  const contact = createContact(session.orgId, {
+  const contact = await createContact(session.orgId, {
     name: body.name,
     email: body.email || null,
     phone: body.phone || null,

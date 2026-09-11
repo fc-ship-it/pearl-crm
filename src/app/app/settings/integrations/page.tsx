@@ -44,7 +44,7 @@ export default async function IntegrationsPage({
   searchParams: Promise<{ connected?: string; error?: string }>;
 }) {
   const session = await getSession();
-  const rows = listIntegrations(session!.orgId);
+  const rows = await listIntegrations(session!.orgId);
   const byProvider = new Map(rows.map((r) => [r.provider, r]));
   const { connected, error } = await searchParams;
 

@@ -11,18 +11,18 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
 
-  const before = getCampaign(session.orgId, id);
+  const before = await getCampaign(session.orgId, id);
   if (!before) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Snapshot the audience BEFORE sendCampaign flips the campaign to "sent" —
   // the segment fields don't change, but this keeps intent obvious.
-  const audience = audienceForSegment(session.orgId, {
+  const audience = await audienceForSegment(session.orgId, {
     interest: before.segmentInterest || undefined,
     budgetTier: before.segmentBudgetTier || undefined,
     targetSegment: before.segmentTargetSegment || undefined,
   });
 
-  const campaign = sendCampaign(session.orgId, id);
+  const campaign = await sendCampaign(session.orgId, id);
   if (!campaign) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Real sending is best-effort and never blocks the response: the campaign
@@ -49,7 +49,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       }
     }
   } else if (campaign.channel === "whatsapp") {
-    const creds = getWhatsAppCreds(session.orgId);
+    const creds = await getWhatsAppCreds(session.orgId);
     for (const contact of audience) {
       if (!creds || !contact.phone) {
         skipped++;

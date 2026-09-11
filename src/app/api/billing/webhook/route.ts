@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, note: "no payment intent id found in payload" });
   }
 
-  const org = findOrgByPendingPaymentIntent(paymentIntentId);
+  const org = await findOrgByPendingPaymentIntent(paymentIntentId);
   if (!org) {
     // Either already applied (and cleared) or not ours — nothing to do.
     return NextResponse.json({ ok: true });
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   try {
     const intent = await getPaymentIntent(paymentIntentId);
     if (intent.status === "completed") {
-      applyCompletedPayment(org.id, paymentIntentId);
+      await applyCompletedPayment(org.id, paymentIntentId);
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

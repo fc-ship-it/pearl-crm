@@ -1,6 +1,11 @@
 import { db, id as newId } from "@/lib/db";
 import { urgencyScore, BILLING_PLANS, BILLING_GRACE_DAYS, type BillingIntervalId } from "@/lib/domain";
 
+// NOTE: every exported function here is `async` now. Under the old
+// node:sqlite driver these were synchronous — but a real network database
+// (Postgres) can't be queried synchronously, so every call site in the app
+// now needs `await`. See src/lib/db.ts for why this move was necessary.
+
 export type Deal = {
   id: string;
   orgId: string;
@@ -144,8 +149,8 @@ function toDeal(r: any): Deal {
   };
 }
 
-export function listDeals(orgId: string): Deal[] {
-  const rows = db
+export async function listDeals(orgId: string): Promise<Deal[]> {
+  const rows = await db
     .prepare(
       `SELECT d.*, c.name as contact_name, co.name as company_name
        FROM deals d
@@ -158,8 +163,8 @@ export function listDeals(orgId: string): Deal[] {
   return rows.map(toDeal);
 }
 
-export function getDeal(orgId: string, dealId: string): Deal | null {
-  const r = db
+export async function getDeal(orgId: string, dealId: string): Promise<Deal | null> {
+  const r = await db
     .prepare(
       `SELECT d.*, c.name as contact_name, co.name as company_name
        FROM deals d
@@ -171,8 +176,8 @@ export function getDeal(orgId: string, dealId: string): Deal | null {
   return r ? toDeal(r) : null;
 }
 
-export function updateDealStage(orgId: string, dealId: string, stage: string) {
-  db.prepare("UPDATE deals SET stage = ?, last_interaction_at = ? WHERE org_id = ? AND id = ?").run(
+export async function updateDealStage(orgId: string, dealId: string, stage: string): Promise<void> {
+  await db.prepare("UPDATE deals SET stage = ?, last_interaction_at = ? WHERE org_id = ? AND id = ?").run(
     stage,
     new Date().toISOString(),
     orgId,
@@ -203,11 +208,11 @@ function toContact(r: any): Contact {
   };
 }
 
-export function setContactTemperature(orgId: string, contactId: string, temperature: LeadTemperature | null) {
-  db.prepare("UPDATE contacts SET temperature = ? WHERE org_id = ? AND id = ?").run(temperature, orgId, contactId);
+export async function setContactTemperature(orgId: string, contactId: string, temperature: LeadTemperature | null): Promise<void> {
+  await db.prepare("UPDATE contacts SET temperature = ? WHERE org_id = ? AND id = ?").run(temperature, orgId, contactId);
 }
 
-export function listContacts(orgId: string, filters: ContactFilters = {}): Contact[] {
+export async function listContacts(orgId: string, filters: ContactFilters = {}): Promise<Contact[]> {
   const clauses = ["ct.org_id = ?"];
   const params: any[] = [orgId];
   if (filters.interest) {
@@ -222,7 +227,7 @@ export function listContacts(orgId: string, filters: ContactFilters = {}): Conta
     clauses.push("ct.target_segment = ?");
     params.push(filters.targetSegment);
   }
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT ct.*, co.name as company_name,
               (SELECT COUNT(*) FROM deals d WHERE d.contact_id = ct.id) as deal_count,
@@ -237,8 +242,8 @@ export function listContacts(orgId: string, filters: ContactFilters = {}): Conta
   return rows.map(toContact);
 }
 
-export function getContact(orgId: string, contactId: string): Contact | null {
-  const r = db
+export async function getContact(orgId: string, contactId: string): Promise<Contact | null> {
+  const r = await db
     .prepare(
       `SELECT ct.*, co.name as company_name
        FROM contacts ct LEFT JOIN companies co ON co.id = ct.company_id
@@ -249,15 +254,15 @@ export function getContact(orgId: string, contactId: string): Contact | null {
 }
 
 /** Finds a company by exact (case-insensitive) name, or creates one — used for both manual entry and vCard/QR imports that carry an organization name. */
-export function getOrCreateCompany(orgId: string, name: string | null | undefined): string | null {
+export async function getOrCreateCompany(orgId: string, name: string | null | undefined): Promise<string | null> {
   const trimmed = (name || "").trim();
   if (!trimmed) return null;
-  const existing = db
+  const existing = (await db
     .prepare("SELECT id FROM companies WHERE org_id = ? AND LOWER(name) = LOWER(?)")
-    .get(orgId, trimmed) as { id: string } | undefined;
+    .get(orgId, trimmed)) as { id: string } | undefined;
   if (existing) return existing.id;
   const cid = newId();
-  db.prepare("INSERT INTO companies (id, org_id, name, sector, website, created_at) VALUES (?,?,?,?,?,?)").run(
+  await db.prepare("INSERT INTO companies (id, org_id, name, sector, website, created_at) VALUES (?,?,?,?,?,?)").run(
     cid,
     orgId,
     trimmed,
@@ -280,33 +285,35 @@ export type NewContactInput = {
   ownerId?: string | null;
 };
 
-export function createContact(orgId: string, input: NewContactInput): Contact {
+export async function createContact(orgId: string, input: NewContactInput): Promise<Contact> {
   const cid = newId();
-  const companyId = getOrCreateCompany(orgId, input.companyName);
+  const companyId = await getOrCreateCompany(orgId, input.companyName);
   const createdAt = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO contacts (id, org_id, company_id, name, email, phone, tags, interest, budget_tier, target_segment, source, owner_id, created_at)
+  await db
+    .prepare(
+      `INSERT INTO contacts (id, org_id, company_id, name, email, phone, tags, interest, budget_tier, target_segment, source, owner_id, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).run(
-    cid,
-    orgId,
-    companyId,
-    input.name.trim(),
-    input.email?.trim() || null,
-    input.phone?.trim() || null,
-    "[]",
-    input.interest?.trim() || null,
-    input.budgetTier || null,
-    input.targetSegment?.trim() || null,
-    input.source || "manual",
-    input.ownerId || null,
-    createdAt
-  );
-  return getContact(orgId, cid)!;
+    )
+    .run(
+      cid,
+      orgId,
+      companyId,
+      input.name.trim(),
+      input.email?.trim() || null,
+      input.phone?.trim() || null,
+      "[]",
+      input.interest?.trim() || null,
+      input.budgetTier || null,
+      input.targetSegment?.trim() || null,
+      input.source || "manual",
+      input.ownerId || null,
+      createdAt
+    );
+  return (await getContact(orgId, cid))!;
 }
 
 /** Bulk-imports contacts (from a parsed .vcf file); duplicates by exact phone or email are skipped. */
-export function importContacts(orgId: string, contacts: NewContactInput[]): { imported: number; skipped: number } {
+export async function importContacts(orgId: string, contacts: NewContactInput[]): Promise<{ imported: number; skipped: number }> {
   let imported = 0;
   let skipped = 0;
   for (const c of contacts) {
@@ -315,27 +322,25 @@ export function importContacts(orgId: string, contacts: NewContactInput[]): { im
       continue;
     }
     if (c.phone || c.email) {
-      const dup = db
+      const dup = (await db
         .prepare(
           `SELECT id FROM contacts WHERE org_id = ? AND ((phone IS NOT NULL AND phone = ?) OR (email IS NOT NULL AND email = ?))`
         )
-        .get(orgId, c.phone || "\0", c.email || "\0") as { id: string } | undefined;
+        .get(orgId, c.phone || null, c.email || null)) as { id: string } | undefined;
       if (dup) {
         skipped++;
         continue;
       }
     }
-    createContact(orgId, { ...c, source: c.source || "import" });
+    await createContact(orgId, { ...c, source: c.source || "import" });
     imported++;
   }
   return { imported, skipped };
 }
 
-export function listActivitiesForContact(orgId: string, contactId: string): Activity[] {
-  const rows = db
-    .prepare(
-      `SELECT * FROM activities WHERE org_id = ? AND contact_id = ? ORDER BY occurred_at DESC`
-    )
+export async function listActivitiesForContact(orgId: string, contactId: string): Promise<Activity[]> {
+  const rows = await db
+    .prepare(`SELECT * FROM activities WHERE org_id = ? AND contact_id = ? ORDER BY occurred_at DESC`)
     .all(orgId, contactId);
   return rows.map((r: any) => ({
     id: r.id,
@@ -349,8 +354,8 @@ export function listActivitiesForContact(orgId: string, contactId: string): Acti
   }));
 }
 
-export function listDealsForContact(orgId: string, contactId: string): Deal[] {
-  const rows = db
+export async function listDealsForContact(orgId: string, contactId: string): Promise<Deal[]> {
+  const rows = await db
     .prepare(`SELECT * FROM deals WHERE org_id = ? AND contact_id = ? ORDER BY created_at DESC`)
     .all(orgId, contactId);
   return rows.map(toDeal);
@@ -373,8 +378,8 @@ function toTask(r: any): TaskRow {
   };
 }
 
-export function listTasks(orgId: string, opts: { onlyOpen?: boolean } = {}): TaskRow[] {
-  const rows = db
+export async function listTasks(orgId: string, opts: { onlyOpen?: boolean } = {}): Promise<TaskRow[]> {
+  const rows = await db
     .prepare(
       `SELECT t.*, c.name as contact_name, d.title as deal_title
        FROM tasks t
@@ -387,8 +392,8 @@ export function listTasks(orgId: string, opts: { onlyOpen?: boolean } = {}): Tas
   return rows.map(toTask);
 }
 
-export function toggleTask(orgId: string, taskId: string, done: boolean) {
-  db.prepare("UPDATE tasks SET done = ? WHERE org_id = ? AND id = ?").run(done ? 1 : 0, orgId, taskId);
+export async function toggleTask(orgId: string, taskId: string, done: boolean): Promise<void> {
+  await db.prepare("UPDATE tasks SET done = ? WHERE org_id = ? AND id = ?").run(done ? 1 : 0, orgId, taskId);
 }
 
 function toMeeting(r: any): Meeting {
@@ -406,8 +411,8 @@ function toMeeting(r: any): Meeting {
   };
 }
 
-export function listMeetings(orgId: string): Meeting[] {
-  const rows = db
+export async function listMeetings(orgId: string): Promise<Meeting[]> {
+  const rows = await db
     .prepare(
       `SELECT m.*, c.name as contact_name FROM meetings m
        LEFT JOIN contacts c ON c.id = m.contact_id
@@ -417,8 +422,8 @@ export function listMeetings(orgId: string): Meeting[] {
   return rows.map(toMeeting);
 }
 
-export function getMeeting(orgId: string, meetingId: string): Meeting | null {
-  const r = db
+export async function getMeeting(orgId: string, meetingId: string): Promise<Meeting | null> {
+  const r = await db
     .prepare(
       `SELECT m.*, c.name as contact_name FROM meetings m
        LEFT JOIN contacts c ON c.id = m.contact_id
@@ -428,8 +433,8 @@ export function getMeeting(orgId: string, meetingId: string): Meeting | null {
   return r ? toMeeting(r) : null;
 }
 
-export function listCompanies(orgId: string) {
-  return db.prepare("SELECT * FROM companies WHERE org_id = ? ORDER BY name ASC").all(orgId) as {
+export async function listCompanies(orgId: string) {
+  return (await db.prepare("SELECT * FROM companies WHERE org_id = ? ORDER BY name ASC").all(orgId)) as {
     id: string;
     name: string;
     sector: string | null;
@@ -437,8 +442,8 @@ export function listCompanies(orgId: string) {
   }[];
 }
 
-export function listIntegrations(orgId: string) {
-  return db.prepare("SELECT * FROM integrations WHERE org_id = ?").all(orgId) as {
+export async function listIntegrations(orgId: string) {
+  return (await db.prepare("SELECT * FROM integrations WHERE org_id = ?").all(orgId)) as {
     id: string;
     provider: string;
     connected: number;
@@ -450,8 +455,8 @@ export function listIntegrations(orgId: string) {
   }[];
 }
 
-export function getIntegration(orgId: string, provider: string) {
-  return db.prepare("SELECT * FROM integrations WHERE org_id = ? AND provider = ?").get(orgId, provider) as
+export async function getIntegration(orgId: string, provider: string) {
+  return (await db.prepare("SELECT * FROM integrations WHERE org_id = ? AND provider = ?").get(orgId, provider)) as
     | {
         id: string;
         provider: string;
@@ -465,39 +470,45 @@ export function getIntegration(orgId: string, provider: string) {
     | undefined;
 }
 
-export function setIntegration(orgId: string, provider: string, connected: boolean) {
-  const existing = db
+export async function setIntegration(orgId: string, provider: string, connected: boolean): Promise<void> {
+  const existing = (await db
     .prepare("SELECT id FROM integrations WHERE org_id = ? AND provider = ?")
-    .get(orgId, provider) as { id: string } | undefined;
+    .get(orgId, provider)) as { id: string } | undefined;
   if (existing) {
-    db.prepare(
-      "UPDATE integrations SET connected = ?, connected_at = ?, access_token = NULL, refresh_token = NULL, token_expiry = NULL, extra = NULL WHERE id = ?"
-    ).run(connected ? 1 : 0, connected ? new Date().toISOString() : null, existing.id);
+    await db
+      .prepare(
+        "UPDATE integrations SET connected = ?, connected_at = ?, access_token = NULL, refresh_token = NULL, token_expiry = NULL, extra = NULL WHERE id = ?"
+      )
+      .run(connected ? 1 : 0, connected ? new Date().toISOString() : null, existing.id);
   } else if (connected) {
-    db.prepare(
-      "INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,1,?)"
-    ).run(newId(), orgId, provider, new Date().toISOString());
+    await db
+      .prepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,1,?)")
+      .run(newId(), orgId, provider, new Date().toISOString());
   }
 }
 
 /** Stores real OAuth/API credentials for a provider and marks it connected. */
-export function saveIntegrationCredentials(
+export async function saveIntegrationCredentials(
   orgId: string,
   provider: string,
   creds: { accessToken?: string; refreshToken?: string; tokenExpiry?: string; extra?: Record<string, unknown> }
-) {
-  const existing = db
+): Promise<void> {
+  const existing = (await db
     .prepare("SELECT id FROM integrations WHERE org_id = ? AND provider = ?")
-    .get(orgId, provider) as { id: string } | undefined;
+    .get(orgId, provider)) as { id: string } | undefined;
   const extraJson = creds.extra ? JSON.stringify(creds.extra) : null;
   if (existing) {
-    db.prepare(
-      "UPDATE integrations SET connected = 1, connected_at = ?, access_token = COALESCE(?, access_token), refresh_token = COALESCE(?, refresh_token), token_expiry = ?, extra = COALESCE(?, extra) WHERE id = ?"
-    ).run(new Date().toISOString(), creds.accessToken ?? null, creds.refreshToken ?? null, creds.tokenExpiry ?? null, extraJson, existing.id);
+    await db
+      .prepare(
+        "UPDATE integrations SET connected = 1, connected_at = ?, access_token = COALESCE(?, access_token), refresh_token = COALESCE(?, refresh_token), token_expiry = ?, extra = COALESCE(?, extra) WHERE id = ?"
+      )
+      .run(new Date().toISOString(), creds.accessToken ?? null, creds.refreshToken ?? null, creds.tokenExpiry ?? null, extraJson, existing.id);
   } else {
-    db.prepare(
-      "INSERT INTO integrations (id, org_id, provider, connected, connected_at, access_token, refresh_token, token_expiry, extra) VALUES (?,?,?,1,?,?,?,?,?)"
-    ).run(newId(), orgId, provider, new Date().toISOString(), creds.accessToken ?? null, creds.refreshToken ?? null, creds.tokenExpiry ?? null, extraJson);
+    await db
+      .prepare(
+        "INSERT INTO integrations (id, org_id, provider, connected, connected_at, access_token, refresh_token, token_expiry, extra) VALUES (?,?,?,1,?,?,?,?,?)"
+      )
+      .run(newId(), orgId, provider, new Date().toISOString(), creds.accessToken ?? null, creds.refreshToken ?? null, creds.tokenExpiry ?? null, extraJson);
   }
 }
 
@@ -525,21 +536,21 @@ export type Organization = {
   stripe_cancel_at_period_end: number;
 };
 
-export function getOrganization(orgId: string): Organization | undefined {
-  return db.prepare("SELECT * FROM organizations WHERE id = ?").get(orgId) as Organization | undefined;
+export async function getOrganization(orgId: string): Promise<Organization | undefined> {
+  return (await db.prepare("SELECT * FROM organizations WHERE id = ?").get(orgId)) as Organization | undefined;
 }
 
 /** Who a billing email for this org should go to — the earliest-created
  * ADMIN account (normally the person who signed up), falling back to
  * whichever user exists first if an org somehow has no ADMIN. */
-export function getOrgBillingContactEmail(orgId: string): string | null {
-  const row = db
+export async function getOrgBillingContactEmail(orgId: string): Promise<string | null> {
+  const row = (await db
     .prepare(
       `SELECT email FROM users WHERE org_id = ?
        ORDER BY CASE WHEN role = 'ADMIN' THEN 0 ELSE 1 END, created_at ASC
        LIMIT 1`
     )
-    .get(orgId) as { email: string } | undefined;
+    .get(orgId)) as { email: string } | undefined;
   return row?.email ?? null;
 }
 
@@ -560,7 +571,7 @@ export function isAccessBlocked(org: Organization): boolean {
  * first "wins" and the other is just a harmless repeat of the same write.
  * Unlike the old Ziina flow this never stacks a period length onto the
  * org's own clock — Stripe is the source of truth for the period end. */
-export function applyStripeSubscription(
+export async function applyStripeSubscription(
   orgId: string,
   sub: {
     customerId: string;
@@ -570,9 +581,10 @@ export function applyStripeSubscription(
     periodEndIso: string | null;
     cancelAtPeriodEnd: boolean;
   }
-) {
-  db.prepare(
-    `UPDATE organizations SET
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE organizations SET
        stripe_customer_id = ?,
        stripe_subscription_id = ?,
        subscription_status = ?,
@@ -581,16 +593,17 @@ export function applyStripeSubscription(
        billing_period_end = COALESCE(?, billing_period_end),
        stripe_cancel_at_period_end = ?
      WHERE id = ?`
-  ).run(
-    sub.customerId,
-    sub.subscriptionId,
-    sub.status,
-    sub.intervalId,
-    sub.intervalId,
-    sub.periodEndIso,
-    sub.cancelAtPeriodEnd ? 1 : 0,
-    orgId
-  );
+    )
+    .run(
+      sub.customerId,
+      sub.subscriptionId,
+      sub.status,
+      sub.intervalId,
+      sub.intervalId,
+      sub.periodEndIso,
+      sub.cancelAtPeriodEnd ? 1 : 0,
+      orgId
+    );
 }
 
 /** An org whose subscription is entirely Stripe-managed (has a
@@ -601,8 +614,8 @@ export function applyStripeSubscription(
  * up before this Stripe migration and are still on a card-less trial, and
  * orgs given a plan manually from the Owner Dashboard (bank transfer /
  * cash — see grantManualPlan), neither of which has a Stripe subscription. */
-export function findOrgByStripeSubscriptionId(subscriptionId: string): Organization | undefined {
-  return db.prepare("SELECT * FROM organizations WHERE stripe_subscription_id = ?").get(subscriptionId) as
+export async function findOrgByStripeSubscriptionId(subscriptionId: string): Promise<Organization | undefined> {
+  return (await db.prepare("SELECT * FROM organizations WHERE stripe_subscription_id = ?").get(subscriptionId)) as
     | Organization
     | undefined;
 }
@@ -611,8 +624,8 @@ export function findOrgByStripeSubscriptionId(subscriptionId: string): Organizat
  * flight for which interval, so the success-page check and the webhook can
  * both recognize it (and so a second, unrelated payment intent for the same
  * org can't be mistaken for this one). */
-export function setPendingPaymentIntent(orgId: string, paymentIntentId: string, interval: BillingIntervalId) {
-  db.prepare("UPDATE organizations SET pending_payment_intent_id = ?, pending_interval = ? WHERE id = ?").run(
+export async function setPendingPaymentIntent(orgId: string, paymentIntentId: string, interval: BillingIntervalId): Promise<void> {
+  await db.prepare("UPDATE organizations SET pending_payment_intent_id = ?, pending_interval = ? WHERE id = ?").run(
     paymentIntentId,
     interval,
     orgId
@@ -626,8 +639,8 @@ export function setPendingPaymentIntent(orgId: string, paymentIntentId: string, 
  * webhook and the success-page check call this for the same payment, and
  * only the first one should actually extend anything. Returns false if this
  * payment was already applied or the org/intent don't match. */
-export function applyCompletedPayment(orgId: string, paymentIntentId: string): boolean {
-  const org = getOrganization(orgId);
+export async function applyCompletedPayment(orgId: string, paymentIntentId: string): Promise<boolean> {
+  const org = await getOrganization(orgId);
   if (!org) return false;
   if (org.last_applied_payment_intent_id === paymentIntentId) return false;
   if (org.pending_payment_intent_id !== paymentIntentId) return false;
@@ -640,13 +653,15 @@ export function applyCompletedPayment(orgId: string, paymentIntentId: string): b
   const base = currentEnd > Date.now() ? currentEnd : Date.now();
   const newEnd = new Date(base + plan.days * 24 * 3600 * 1000).toISOString();
 
-  db.prepare(
-    `UPDATE organizations
+  await db
+    .prepare(
+      `UPDATE organizations
      SET plan = ?, billing_interval = ?, billing_period_end = ?, subscription_status = 'active',
          grace_until = NULL, pending_payment_intent_id = NULL, pending_interval = NULL,
          last_applied_payment_intent_id = ?
      WHERE id = ?`
-  ).run(interval, interval, newEnd, paymentIntentId, orgId);
+    )
+    .run(interval, interval, newEnd, paymentIntentId, orgId);
   return true;
 }
 
@@ -654,8 +669,8 @@ export function applyCompletedPayment(orgId: string, paymentIntentId: string): b
  * window and (by returning them here) triggers a fresh renewal email; a
  * later pass — once `grace_until` itself is past — suspends access. Used by
  * the daily /api/billing/cron check. */
-export function listOrgsToMoveToGrace(): Organization[] {
-  const rows = db
+export async function listOrgsToMoveToGrace(): Promise<Organization[]> {
+  const rows = await db
     .prepare(
       `SELECT * FROM organizations
        WHERE subscription_status = 'active' AND billing_period_end IS NOT NULL AND billing_period_end < ?
@@ -665,9 +680,9 @@ export function listOrgsToMoveToGrace(): Organization[] {
   return rows as Organization[];
 }
 
-export function moveOrgToGrace(orgId: string) {
+export async function moveOrgToGrace(orgId: string): Promise<void> {
   const graceUntil = new Date(Date.now() + BILLING_GRACE_DAYS * 24 * 3600 * 1000).toISOString();
-  db.prepare("UPDATE organizations SET subscription_status = 'past_due', grace_until = ? WHERE id = ?").run(graceUntil, orgId);
+  await db.prepare("UPDATE organizations SET subscription_status = 'past_due', grace_until = ? WHERE id = ?").run(graceUntil, orgId);
 }
 
 /** Orgs whose free trial has simply run out with no plan ever chosen — a
@@ -676,15 +691,15 @@ export function moveOrgToGrace(orgId: string) {
  * lapsed paid plan (moveOrgToGrace / listOrgsToSuspend), so "the trial ended"
  * and "the subscription lapsed" both resolve the same way: a few days of
  * grace, then /billing-required. */
-export function listTrialsToExpire(): Organization[] {
-  const rows = db
+export async function listTrialsToExpire(): Promise<Organization[]> {
+  const rows = await db
     .prepare(`SELECT * FROM organizations WHERE subscription_status = 'trialing' AND trial_ends_at < ?`)
     .all(new Date().toISOString());
   return rows as Organization[];
 }
 
-export function listOrgsToSuspend(): Organization[] {
-  const rows = db
+export async function listOrgsToSuspend(): Promise<Organization[]> {
+  const rows = await db
     .prepare(
       `SELECT * FROM organizations
        WHERE subscription_status = 'past_due' AND grace_until IS NOT NULL AND grace_until < ?
@@ -694,24 +709,25 @@ export function listOrgsToSuspend(): Organization[] {
   return rows as Organization[];
 }
 
-export function suspendOrg(orgId: string) {
-  db.prepare("UPDATE organizations SET subscription_status = 'suspended' WHERE id = ?").run(orgId);
+export async function suspendOrg(orgId: string): Promise<void> {
+  await db.prepare("UPDATE organizations SET subscription_status = 'suspended' WHERE id = ?").run(orgId);
 }
 
 /** Looks up which org a Ziina webhook event belongs to, by the payment
  * intent id it carries — webhooks don't know our internal org ids, only
  * Ziina's own payment_intent id, which we stashed on the org row when the
  * checkout started (see setPendingPaymentIntent). */
-export function findOrgByPendingPaymentIntent(paymentIntentId: string): Organization | undefined {
-  return db.prepare("SELECT * FROM organizations WHERE pending_payment_intent_id = ?").get(paymentIntentId) as
+export async function findOrgByPendingPaymentIntent(paymentIntentId: string): Promise<Organization | undefined> {
+  return (await db.prepare("SELECT * FROM organizations WHERE pending_payment_intent_id = ?").get(paymentIntentId)) as
     | Organization
     | undefined;
 }
 
 /** Alerts: open deals gone quiet, sorted by urgency desc. */
-export function listAlerts(orgId: string) {
-  const deals = listDeals(orgId).filter((d) => !d.stage.startsWith("closed"));
+export async function listAlerts(orgId: string) {
+  const deals = await listDeals(orgId);
   return deals
+    .filter((d) => !d.stage.startsWith("closed"))
     .map((d) => ({ deal: d, score: urgencyScore(d) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score);
@@ -734,20 +750,20 @@ function toCampaign(r: any): Campaign {
   };
 }
 
-export function listCampaigns(orgId: string): Campaign[] {
-  const rows = db.prepare("SELECT * FROM campaigns WHERE org_id = ? ORDER BY created_at DESC").all(orgId);
+export async function listCampaigns(orgId: string): Promise<Campaign[]> {
+  const rows = await db.prepare("SELECT * FROM campaigns WHERE org_id = ? ORDER BY created_at DESC").all(orgId);
   return rows.map(toCampaign);
 }
 
-export function getCampaign(orgId: string, campaignId: string): Campaign | null {
-  const r = db.prepare("SELECT * FROM campaigns WHERE org_id = ? AND id = ?").get(orgId, campaignId);
+export async function getCampaign(orgId: string, campaignId: string): Promise<Campaign | null> {
+  const r = await db.prepare("SELECT * FROM campaigns WHERE org_id = ? AND id = ?").get(orgId, campaignId);
   return r ? toCampaign(r) : null;
 }
 
 export type CampaignSegment = { interest?: string; budgetTier?: string; targetSegment?: string };
 
 /** Contacts matching a campaign's targeting filters — used both for the live "N recipients" preview and at send time. */
-export function audienceForSegment(orgId: string, segment: CampaignSegment): Contact[] {
+export async function audienceForSegment(orgId: string, segment: CampaignSegment): Promise<Contact[]> {
   return listContacts(orgId, {
     interest: segment.interest || undefined,
     budgetTier: segment.budgetTier || undefined,
@@ -755,29 +771,31 @@ export function audienceForSegment(orgId: string, segment: CampaignSegment): Con
   });
 }
 
-export function createCampaign(
+export async function createCampaign(
   orgId: string,
   input: { title: string; message: string; channel: string; segment: CampaignSegment }
-): Campaign {
+): Promise<Campaign> {
   const cid = newId();
-  db.prepare(
-    `INSERT INTO campaigns (id, org_id, title, message, channel, segment_interest, segment_budget_tier, segment_target_segment, status, recipient_count, created_at, sent_at)
+  await db
+    .prepare(
+      `INSERT INTO campaigns (id, org_id, title, message, channel, segment_interest, segment_budget_tier, segment_target_segment, status, recipient_count, created_at, sent_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).run(
-    cid,
-    orgId,
-    input.title.trim(),
-    input.message.trim(),
-    input.channel,
-    input.segment.interest || null,
-    input.segment.budgetTier || null,
-    input.segment.targetSegment || null,
-    "draft",
-    0,
-    new Date().toISOString(),
-    null
-  );
-  return getCampaign(orgId, cid)!;
+    )
+    .run(
+      cid,
+      orgId,
+      input.title.trim(),
+      input.message.trim(),
+      input.channel,
+      input.segment.interest || null,
+      input.segment.budgetTier || null,
+      input.segment.targetSegment || null,
+      "draft",
+      0,
+      new Date().toISOString(),
+      null
+    );
+  return (await getCampaign(orgId, cid))!;
 }
 
 /**
@@ -786,25 +804,24 @@ export function createCampaign(
  * audience match, recipient count and per-contact activity log are all real,
  * so the workflow is genuinely demoable end to end.
  */
-export function sendCampaign(orgId: string, campaignId: string): Campaign | null {
-  const campaign = getCampaign(orgId, campaignId);
+export async function sendCampaign(orgId: string, campaignId: string): Promise<Campaign | null> {
+  const campaign = await getCampaign(orgId, campaignId);
   if (!campaign) return null;
-  const audience = audienceForSegment(orgId, {
+  const audience = await audienceForSegment(orgId, {
     interest: campaign.segmentInterest || undefined,
     budgetTier: campaign.segmentBudgetTier || undefined,
     targetSegment: campaign.segmentTargetSegment || undefined,
   });
   const sentAt = new Date().toISOString();
-  db.prepare("UPDATE campaigns SET status = 'sent', recipient_count = ?, sent_at = ? WHERE id = ? AND org_id = ?").run(
-    audience.length,
-    sentAt,
-    campaignId,
-    orgId
-  );
+  await db
+    .prepare("UPDATE campaigns SET status = 'sent', recipient_count = ?, sent_at = ? WHERE id = ? AND org_id = ?")
+    .run(audience.length, sentAt, campaignId, orgId);
   for (const contact of audience) {
-    db.prepare(
-      "INSERT INTO activities (id, org_id, contact_id, deal_id, type, content, occurred_at, created_at) VALUES (?,?,?,?,?,?,?,?)"
-    ).run(newId(), orgId, contact.id, null, campaign.channel, `Campaign sent: ${campaign.title}`, sentAt, sentAt);
+    await db
+      .prepare(
+        "INSERT INTO activities (id, org_id, contact_id, deal_id, type, content, occurred_at, created_at) VALUES (?,?,?,?,?,?,?,?)"
+      )
+      .run(newId(), orgId, contact.id, null, campaign.channel, `Campaign sent: ${campaign.title}`, sentAt, sentAt);
   }
   return getCampaign(orgId, campaignId);
 }
@@ -823,8 +840,8 @@ function toCustomAlert(r: any): CustomAlert {
   };
 }
 
-export function listCustomAlerts(orgId: string, opts: { onlyOpen?: boolean } = {}): CustomAlert[] {
-  const rows = db
+export async function listCustomAlerts(orgId: string, opts: { onlyOpen?: boolean } = {}): Promise<CustomAlert[]> {
+  const rows = await db
     .prepare(
       `SELECT ca.*, c.name as contact_name
        FROM custom_alerts ca LEFT JOIN contacts c ON c.id = ca.contact_id
@@ -835,22 +852,23 @@ export function listCustomAlerts(orgId: string, opts: { onlyOpen?: boolean } = {
   return rows.map(toCustomAlert);
 }
 
-export function createCustomAlert(
+export async function createCustomAlert(
   orgId: string,
   title: string,
   remindAt: string,
   kind: AlertKind = "general",
   contactId: string | null = null
-): CustomAlert {
+): Promise<CustomAlert> {
   const aid = newId();
-  db.prepare(
-    "INSERT INTO custom_alerts (id, org_id, title, remind_at, done, created_at, kind, contact_id) VALUES (?,?,?,?,?,?,?,?)"
-  ).run(aid, orgId, title.trim(), remindAt, 0, new Date().toISOString(), kind, contactId);
-  return listCustomAlerts(orgId).find((a) => a.id === aid)!;
+  await db
+    .prepare("INSERT INTO custom_alerts (id, org_id, title, remind_at, done, created_at, kind, contact_id) VALUES (?,?,?,?,?,?,?,?)")
+    .run(aid, orgId, title.trim(), remindAt, 0, new Date().toISOString(), kind, contactId);
+  const all = await listCustomAlerts(orgId);
+  return all.find((a) => a.id === aid)!;
 }
 
-export function toggleCustomAlert(orgId: string, alertId: string, done: boolean) {
-  db.prepare("UPDATE custom_alerts SET done = ? WHERE org_id = ? AND id = ?").run(done ? 1 : 0, orgId, alertId);
+export async function toggleCustomAlert(orgId: string, alertId: string, done: boolean): Promise<void> {
+  await db.prepare("UPDATE custom_alerts SET done = ? WHERE org_id = ? AND id = ?").run(done ? 1 : 0, orgId, alertId);
 }
 
 // ---- Owner (AHEAD LLC) — cross-tenant views -----------------------------
@@ -871,8 +889,8 @@ export type OrgSummary = {
   dealCount: number;
 };
 
-export function listAllOrganizations(): OrgSummary[] {
-  const rows = db
+export async function listAllOrganizations(): Promise<OrgSummary[]> {
+  const rows = (await db
     .prepare(
       `SELECT o.id, o.name, o.plan, o.trial_ends_at, o.promo_bonus_days, o.created_at,
               (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id) AS user_count,
@@ -881,7 +899,7 @@ export function listAllOrganizations(): OrgSummary[] {
        FROM organizations o
        ORDER BY o.created_at DESC`
     )
-    .all() as any[];
+    .all()) as any[];
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -889,9 +907,9 @@ export function listAllOrganizations(): OrgSummary[] {
     trialEndsAt: r.trial_ends_at,
     promoBonusDays: r.promo_bonus_days,
     createdAt: r.created_at,
-    userCount: r.user_count,
-    contactCount: r.contact_count,
-    dealCount: r.deal_count,
+    userCount: Number(r.user_count),
+    contactCount: Number(r.contact_count),
+    dealCount: Number(r.deal_count),
   }));
 }
 
@@ -905,14 +923,14 @@ export type PlatformUser = {
   createdAt: string;
 };
 
-export function listAllUsers(): PlatformUser[] {
-  const rows = db
+export async function listAllUsers(): Promise<PlatformUser[]> {
+  const rows = (await db
     .prepare(
       `SELECT u.id, u.org_id, o.name AS org_name, u.name, u.email, u.role, u.created_at
        FROM users u JOIN organizations o ON o.id = u.org_id
        ORDER BY u.created_at DESC`
     )
-    .all() as any[];
+    .all()) as any[];
   return rows.map((r) => ({
     id: r.id,
     orgId: r.org_id,
@@ -941,8 +959,8 @@ export type PlatformContact = {
 };
 
 /** Every contact across every client organization — platform-owner-only, used for the Owner Dashboard's Excel export. */
-export function listAllContacts(): PlatformContact[] {
-  const rows = db
+export async function listAllContacts(): Promise<PlatformContact[]> {
+  const rows = (await db
     .prepare(
       `SELECT ct.id, ct.org_id, o.name AS org_name, ct.name, ct.email, ct.phone,
               co.name AS company_name, ct.interest, ct.budget_tier, ct.target_segment,
@@ -952,7 +970,7 @@ export function listAllContacts(): PlatformContact[] {
        LEFT JOIN companies co ON co.id = ct.company_id
        ORDER BY o.name ASC, ct.created_at DESC`
     )
-    .all() as any[];
+    .all()) as any[];
   return rows.map((r) => ({
     id: r.id,
     orgId: r.org_id,
@@ -970,8 +988,8 @@ export function listAllContacts(): PlatformContact[] {
   }));
 }
 
-export function platformStats() {
-  const orgs = listAllOrganizations();
+export async function platformStats() {
+  const orgs = await listAllOrganizations();
   const now = Date.now();
   return {
     totalOrgs: orgs.length,
@@ -982,12 +1000,12 @@ export function platformStats() {
   };
 }
 
-export function extendTrial(orgId: string, days: number) {
-  const org = getOrganization(orgId);
+export async function extendTrial(orgId: string, days: number): Promise<void> {
+  const org = await getOrganization(orgId);
   if (!org) return;
   const base = Math.max(new Date(org.trial_ends_at).getTime(), Date.now());
   const newEnd = new Date(base + days * 24 * 3600 * 1000).toISOString();
-  db.prepare("UPDATE organizations SET trial_ends_at = ?, promo_bonus_days = promo_bonus_days + ? WHERE id = ?").run(
+  await db.prepare("UPDATE organizations SET trial_ends_at = ?, promo_bonus_days = promo_bonus_days + ? WHERE id = ?").run(
     newEnd,
     days,
     orgId
@@ -999,35 +1017,39 @@ export function extendTrial(orgId: string, days: number) {
  * account) rather than through the in-app checkout. Same effect as a
  * completed Ziina payment: activates the plan and extends the period,
  * stacking onto whatever's left of the current one. */
-export function grantManualPlan(orgId: string, interval: BillingIntervalId) {
+export async function grantManualPlan(orgId: string, interval: BillingIntervalId): Promise<void> {
   const plan = BILLING_PLANS.find((p) => p.id === interval);
   if (!plan) return;
-  const org = getOrganization(orgId);
+  const org = await getOrganization(orgId);
   if (!org) return;
   const currentEnd = org.billing_period_end ? new Date(org.billing_period_end).getTime() : 0;
   const base = currentEnd > Date.now() ? currentEnd : Date.now();
   const newEnd = new Date(base + plan.days * 24 * 3600 * 1000).toISOString();
-  db.prepare(
-    `UPDATE organizations SET plan = ?, billing_interval = ?, billing_period_end = ?, subscription_status = 'active', grace_until = NULL WHERE id = ?`
-  ).run(interval, interval, newEnd, orgId);
+  await db
+    .prepare(
+      `UPDATE organizations SET plan = ?, billing_interval = ?, billing_period_end = ?, subscription_status = 'active', grace_until = NULL WHERE id = ?`
+    )
+    .run(interval, interval, newEnd, orgId);
 }
 
-export function dashboardStats(orgId: string) {
-  const deals = listDeals(orgId);
+export async function dashboardStats(orgId: string) {
+  const deals = await listDeals(orgId);
   const open = deals.filter((d) => !d.stage.startsWith("closed"));
   const won = deals.filter((d) => d.stage === "closed_won");
   const lost = deals.filter((d) => d.stage === "closed_lost");
   const pipelineValue = open.reduce((s, d) => s + d.value, 0);
   const wonValue = won.reduce((s, d) => s + d.value, 0);
   const conversionRate = deals.length > 0 ? Math.round((won.length / (won.length + lost.length || 1)) * 100) : 0;
-  const dueCustomAlerts = listCustomAlerts(orgId, { onlyOpen: true }).filter((a) => new Date(a.remindAt).getTime() <= Date.now());
+  const openAlerts = await listCustomAlerts(orgId, { onlyOpen: true });
+  const dueCustomAlerts = openAlerts.filter((a) => new Date(a.remindAt).getTime() <= Date.now());
+  const dealsAtRisk = (await listAlerts(orgId)).slice(0, 5);
   return {
     pipelineValue,
     wonValue,
     openCount: open.length,
     wonCount: won.length,
     conversionRate,
-    dealsAtRisk: listAlerts(orgId).slice(0, 5),
+    dealsAtRisk,
     dueCustomAlerts,
   };
 }

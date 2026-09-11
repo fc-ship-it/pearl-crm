@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const audience = audienceForSegment(session.orgId, {
+  const audience = await audienceForSegment(session.orgId, {
     interest: body.interest || undefined,
     budgetTier: body.budgetTier || undefined,
     targetSegment: body.targetSegment || undefined,

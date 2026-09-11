@@ -17,8 +17,8 @@ export default async function ContactsPage({
     budgetTier: sp.budgetTier || undefined,
     targetSegment: sp.targetSegment || undefined,
   };
-  const contacts = listContacts(session!.orgId, filters);
-  const allContacts = listContacts(session!.orgId);
+  const contacts = await listContacts(session!.orgId, filters);
+  const allContacts = await listContacts(session!.orgId);
   const segments = Array.from(new Set(allContacts.map((c) => c.targetSegment).filter(Boolean))) as string[];
   const hasFilters = !!(filters.interest || filters.budgetTier || filters.targetSegment);
 

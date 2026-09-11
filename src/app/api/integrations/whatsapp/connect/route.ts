@@ -23,6 +23,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Meta ha rifiutato queste credenziali. Controlla token e Phone Number ID." }, { status: 400 });
   }
 
-  saveWhatsAppCredentials(session.orgId, parsed.data.token, parsed.data.phoneNumberId, check.displayNumber);
+  await saveWhatsAppCredentials(session.orgId, parsed.data.token, parsed.data.phoneNumberId, check.displayNumber);
   return NextResponse.json({ ok: true, displayNumber: check.displayNumber });
 }

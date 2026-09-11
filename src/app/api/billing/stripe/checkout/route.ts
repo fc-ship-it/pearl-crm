@@ -25,11 +25,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid plan." }, { status: 400 });
   }
 
-  const org = getOrganization(session.orgId);
+  const org = await getOrganization(session.orgId);
   if (!org) return NextResponse.json({ error: "Organization not found." }, { status: 404 });
 
   const appUrl = getAppBaseUrl(req.url);
-  const email = getOrgBillingContactEmail(session.orgId) ?? undefined;
+  const email = (await getOrgBillingContactEmail(session.orgId)) ?? undefined;
 
   try {
     const { url } = await createSubscriptionCheckout({

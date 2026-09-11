@@ -7,7 +7,7 @@ import { CheckCircle2, MessageSquareWarning, ListChecks, ArrowRight, Users } fro
 export default async function MeetingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getSession();
-  const meeting = getMeeting(session!.orgId, id);
+  const meeting = await getMeeting(session!.orgId, id);
   if (!meeting || !meeting.summary) notFound();
   const s = meeting.summary;
 

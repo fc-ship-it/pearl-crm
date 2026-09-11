@@ -11,6 +11,6 @@ export async function POST(req: NextRequest) {
   if (!["gmail", "whatsapp", "calendar"].includes(body.provider)) {
     return NextResponse.json({ error: "invalid provider" }, { status: 400 });
   }
-  setIntegration(session.orgId, body.provider, !!body.connected);
+  await setIntegration(session.orgId, body.provider, !!body.connected);
   return NextResponse.json({ ok: true });
 }

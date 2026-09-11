@@ -19,7 +19,7 @@ const INCLUDED_FEATURES = [
 export default async function BillingRequiredPage() {
   const session = await getSession();
   if (!session) redirect("/login");
-  const org = getOrganization(session.orgId);
+  const org = await getOrganization(session.orgId);
   if (!org) redirect("/login");
   if (!isAccessBlocked(org)) redirect("/app/dashboard");
 

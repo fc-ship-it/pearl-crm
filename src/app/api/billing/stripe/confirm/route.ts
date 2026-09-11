@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
     if (orgId && subscriptionId) {
       const sub = await getSubscription(subscriptionId);
-      applyStripeSubscription(orgId, normalizeSubscription(sub));
+      await applyStripeSubscription(orgId, normalizeSubscription(sub));
     }
   } catch (err) {
     if (!(err instanceof StripeNotConfiguredError)) {

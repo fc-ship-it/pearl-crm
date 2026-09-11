@@ -10,11 +10,11 @@ const ICONS: Record<string, any> = { mail: Mail, phone: Phone, "message-circle":
 export default async function ContactDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getSession();
-  const contact = getContact(session!.orgId, id);
+  const contact = await getContact(session!.orgId, id);
   if (!contact) notFound();
 
-  const activities = listActivitiesForContact(session!.orgId, id);
-  const deals = listDealsForContact(session!.orgId, id);
+  const activities = await listActivitiesForContact(session!.orgId, id);
+  const deals = await listDealsForContact(session!.orgId, id);
 
   return (
     <div className="max-w-[1000px] space-y-5">

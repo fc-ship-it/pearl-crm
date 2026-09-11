@@ -4,7 +4,7 @@ import NewContactForm from "@/components/NewContactForm";
 
 export default async function NewContactPage() {
   const session = await getSession();
-  const companies = listCompanies(session!.orgId);
+  const companies = await listCompanies(session!.orgId);
 
   return (
     <div className="max-w-[760px]">

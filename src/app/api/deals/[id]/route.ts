@@ -15,6 +15,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!VALID_STAGES.has(body.stage)) {
     return NextResponse.json({ error: "invalid stage" }, { status: 400 });
   }
-  updateDealStage(session.orgId, id, body.stage);
+  await updateDealStage(session.orgId, id, body.stage);
   return NextResponse.json({ ok: true });
 }

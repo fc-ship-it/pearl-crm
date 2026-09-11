@@ -24,7 +24,7 @@ export default async function BillingPage({
 }) {
   const session = await getSession();
   const sp = await searchParams;
-  const org = getOrganization(session!.orgId)!;
+  const org = (await getOrganization(session!.orgId))!;
 
   // By the time this page renders, /api/billing/stripe/confirm has already
   // synchronously reconciled the org's row with Stripe (see that route) —

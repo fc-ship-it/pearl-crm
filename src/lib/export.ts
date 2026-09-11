@@ -37,9 +37,9 @@ export async function buildOwnerExportWorkbook(): Promise<Buffer> {
   workbook.creator = "Pearl";
   workbook.created = new Date();
 
-  const orgs = listAllOrganizations();
-  const users = listAllUsers();
-  const contacts = listAllContacts();
+  const orgs = await listAllOrganizations();
+  const users = await listAllUsers();
+  const contacts = await listAllContacts();
 
   const clienti = workbook.addWorksheet("Clienti");
   clienti.columns = [

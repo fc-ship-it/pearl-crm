@@ -9,6 +9,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
-  toggleCustomAlert(session.orgId, id, !!body.done);
+  await toggleCustomAlert(session.orgId, id, !!body.done);
   return NextResponse.json({ ok: true });
 }

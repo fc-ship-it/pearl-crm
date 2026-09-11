@@ -4,7 +4,7 @@ import PipelineBoard from "@/components/PipelineBoard";
 
 export default async function PipelinePage() {
   const session = await getSession();
-  const deals = listDeals(session!.orgId);
+  const deals = await listDeals(session!.orgId);
 
   return (
     <div className="max-w-[1400px]">

@@ -11,7 +11,7 @@ const VALID_KINDS = new Set<string>(ALERT_KINDS);
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const alerts = listCustomAlerts(session.orgId, { onlyOpen: true });
+  const alerts = await listCustomAlerts(session.orgId, { onlyOpen: true });
   return NextResponse.json({ alerts });
 }
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   }
   const kind: AlertKind = VALID_KINDS.has(body.kind) ? body.kind : "general";
 
-  const alert = createCustomAlert(
+  const alert = await createCustomAlert(
     session.orgId,
     body.title,
     new Date(body.remindAt).toISOString(),

@@ -37,12 +37,13 @@ export async function POST(req: NextRequest) {
         const orgId = session.client_reference_id || (session.metadata?.orgId as string | undefined);
         const subscriptionId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
         if (orgId && subscriptionId) {
-          const wasIncomplete = getOrganization(orgId)?.subscription_status === "incomplete";
+          const existingOrg = await getOrganization(orgId);
+          const wasIncomplete = existingOrg?.subscription_status === "incomplete";
           const sub = await getSubscription(subscriptionId);
-          applyStripeSubscription(orgId, normalizeSubscription(sub));
+          await applyStripeSubscription(orgId, normalizeSubscription(sub));
           if (wasIncomplete) {
-            const org = getOrganization(orgId);
-            const email = getOrgBillingContactEmail(orgId);
+            const org = await getOrganization(orgId);
+            const email = await getOrgBillingContactEmail(orgId);
             if (org && email) {
               await sendWelcomeEmail({ contactName: "there", contactEmail: email, orgName: org.name });
             }
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
         const orgId = sub.metadata?.orgId;
-        if (orgId) applyStripeSubscription(orgId, normalizeSubscription(sub));
+        if (orgId) await applyStripeSubscription(orgId, normalizeSubscription(sub));
         break;
       }
       case "invoice.payment_failed": {
@@ -70,9 +71,9 @@ export async function POST(req: NextRequest) {
           const sub = await getSubscription(subId);
           const orgId = sub.metadata?.orgId;
           if (orgId) {
-            applyStripeSubscription(orgId, normalizeSubscription(sub));
-            const org = getOrganization(orgId);
-            const email = getOrgBillingContactEmail(orgId);
+            await applyStripeSubscription(orgId, normalizeSubscription(sub));
+            const org = await getOrganization(orgId);
+            const email = await getOrgBillingContactEmail(orgId);
             if (org && email) await sendPaymentFailedEmail({ contactEmail: email, orgName: org.name });
           }
         }

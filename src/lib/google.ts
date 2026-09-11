@@ -98,7 +98,7 @@ export async function completeGoogleConnect(orgId: string, code: string, redirec
   const expiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
   const email = await getUserEmail(tokens.access_token);
   for (const provider of ["gmail", "calendar"]) {
-    saveIntegrationCredentials(orgId, provider, {
+    await saveIntegrationCredentials(orgId, provider, {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token, // present only on first consent
       tokenExpiry: expiry,
@@ -111,7 +111,7 @@ export async function completeGoogleConnect(orgId: string, code: string, redirec
 /** Returns a valid access token for the org's connected Google account,
  * refreshing it first if it has expired. Returns null if not connected. */
 export async function getValidGoogleAccessToken(orgId: string): Promise<string | null> {
-  const row = getIntegration(orgId, "calendar") || getIntegration(orgId, "gmail");
+  const row = (await getIntegration(orgId, "calendar")) || (await getIntegration(orgId, "gmail"));
   if (!row || !row.connected || !row.access_token) return null;
   const expired = !row.token_expiry || new Date(row.token_expiry).getTime() <= Date.now() + 60_000;
   if (!expired) return row.access_token;
@@ -119,7 +119,7 @@ export async function getValidGoogleAccessToken(orgId: string): Promise<string |
   const refreshed = await refreshAccessToken(row.refresh_token);
   const expiry = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
   for (const provider of ["gmail", "calendar"]) {
-    saveIntegrationCredentials(orgId, provider, { accessToken: refreshed.access_token, tokenExpiry: expiry });
+    await saveIntegrationCredentials(orgId, provider, { accessToken: refreshed.access_token, tokenExpiry: expiry });
   }
   return refreshed.access_token;
 }

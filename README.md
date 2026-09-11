@@ -4,12 +4,16 @@ A real application (not a single demo file): Next.js + TypeScript, with a real b
 
 ## Quick start
 
+Pearl needs a Postgres database — see "Database (Postgres via Neon)" below for why and how to get a free one in a couple of minutes. Once you have a connection string:
+
 ```bash
 npm install
-npm run dev
+DATABASE_URL="postgresql://<user>:<password>@<host>/<db>?sslmode=require" npm run dev
 ```
 
-Open `http://localhost:3000`. On first run the database creates and seeds itself with realistic demo data (UAE contacts, pipeline, tasks, one already-generated meeting).
+(or put `DATABASE_URL=...` in a `.env.local` file instead of passing it inline — Next.js loads it automatically).
+
+Open `http://localhost:3000`. On first run the database creates its schema and seeds itself with realistic demo data (UAE contacts, pipeline, tasks, one already-generated meeting) — nothing else to set up.
 
 **Demo login:** `demo@pearlcrm.ae` / `demo1234` ("Use demo credentials" button is already on the page).
 
@@ -79,13 +83,20 @@ What it unlocks once connected: "Send now" on a WhatsApp campaign actually messa
 3. In Pearl, go to Settings → Integrations → WhatsApp Business → "Connect", paste the access token and Phone Number ID, and submit — Pearl calls Meta's API right away to confirm they work before marking it connected.
 4. **Important limitation to know about**: Meta only allows free-form text messages within 24 hours of the customer's last message to you (the "customer service window"). Outside that window, only a pre-approved message **template** can be sent. Pearl's campaign send uses free-form text — great for following up an active conversation, not guaranteed for cold outbound to a whole segment. Template support can be added later if you need it for broader campaigns.
 
-## Why `node:sqlite` and not Postgres/Prisma
+## Database (Postgres via Neon)
 
-For the MVP the database is SQLite via Node.js's native `node:sqlite` module (zero dependencies to install, zero native builds, `npm install` always clean). The schema (`src/lib/db.ts`) is plain, portable SQL: moving to Postgres in production means:
+Pearl stores everything in Postgres, via the `pg` client (`src/lib/db.ts`) — no ORM, plain SQL, same shape of queries throughout `src/lib/data.ts`.
 
-1. Creating a Postgres database (e.g. Neon, Supabase, RDS).
-2. Replacing `src/lib/db.ts` with a `pg` client or Prisma pointed at Postgres, keeping the same tables/columns.
-3. No page or component needs to change: every query goes through `src/lib/data.ts`.
+**Why not SQLite:** an earlier version of this project used Node's built-in `node:sqlite`, writing to a local file — simple for a demo, but broken for real use on Netlify/Vercel: their filesystem is read-only outside `/tmp`, and `/tmp` is **not shared** between separate serverless function instances. In practice this meant two different requests could see two different (often empty) "databases" — the cause of a real bug where a user who had just signed up could immediately fail to log back in. Postgres, reached over the network from every instance alike, doesn't have this problem.
+
+**Getting a free Postgres database (Neon):**
+
+1. Go to [neon.tech](https://neon.tech) and create a free account (their free tier is more than enough for Pearl).
+2. Create a new project (any name, e.g. "pearl-crm"). Neon creates a default database and gives you a **connection string** right away — copy it (it looks like `postgresql://<user>:<password>@<host>/<db>?sslmode=require`).
+3. Add it as the `DATABASE_URL` environment variable — locally in `.env.local` for development, and on Netlify/Vercel under Site settings → Environment variables for production (see "Deploy" below). Never share this connection string outside your own environment variables — it's a credential, treat it like a password.
+4. Deploy (or restart `npm run dev` locally). The schema and demo data create themselves automatically on first request — no migration step to run by hand.
+
+The schema lives in `src/lib/db.ts` as plain `CREATE TABLE IF NOT EXISTS` statements, plus a small set of `ALTER TABLE ADD COLUMN IF NOT EXISTS`-style guards so an existing database picks up new columns automatically as the product grows — no separate migration tool needed for a project this size.
 
 ## Deploy
 
@@ -96,20 +107,18 @@ The app is a standard Next.js project: it deploys to Vercel, Netlify, or any Nod
 1. Push this project to a GitHub (or GitLab/Bitbucket) repository.
 2. In the [Netlify dashboard](https://app.netlify.com/), "Add new site" → "Import an existing project", and pick that repository. Netlify auto-detects Next.js (via its built-in Next.js Runtime) — no build settings to change.
 3. Before the first deploy, add these environment variables under Site settings → Environment variables:
+   - `DATABASE_URL` — your Neon (or any Postgres) connection string. See "Database (Postgres via Neon)" above. Required — the app refuses to start without it.
    - `AUTH_SECRET` (any long random string, e.g. generated with `openssl rand -base64 32`). Without it the app falls back to a development secret hardcoded in the code — fine for a quick look, not for anything real.
    - `OWNER_PASSWORD` — the password for **your** private Owner Dashboard (see below). Without it, the app falls back to a hardcoded dev password (`pearl-owner-dev-password`) — change this before sharing the link with anyone.
    - (optional) `RESEND_API_KEY` and `OWNER_NOTIFY_EMAIL` — see "Getting notified of new signups by email" below.
    - (optional, for real billing) `ZIINA_ACCESS_TOKEN` and `CRON_SECRET` — see `ZIINA_INTEGRATION.md`.
-4. Deploy. The demo data seeds itself automatically on first request — no separate setup step, no database to provision.
+4. Deploy. The database schema and demo data create themselves automatically on first request against `DATABASE_URL` — no separate migration step.
 
 ### Deploying to Vercel
 
-Same idea: push to GitHub, [import the repository](https://vercel.com/new) (auto-detected as Next.js), add the same environment variables in the Vercel project settings, deploy.
+Same idea: push to GitHub, [import the repository](https://vercel.com/new) (auto-detected as Next.js), add the same environment variables (including `DATABASE_URL`) in the Vercel project settings, deploy.
 
-**About the database on Netlify/Vercel:** `src/lib/db.ts` detects a serverless environment (`NETLIFY` or `VERCEL` env vars, with a write-test fallback for any other host) and points SQLite at `/tmp` instead of the project folder, since these platforms' filesystem is read-only outside `/tmp` — without this the app would crash on first request. This makes the app *deployable*, but `/tmp` is not guaranteed to persist between invocations or be shared across concurrent instances, so: the demo re-seeds itself cleanly on a cold start (nothing to configure), but data added by one visitor (a new contact, a sent campaign) may not be visible to another visitor hitting a different instance, and can disappear after a period of inactivity. This is fine for demos, walkthroughs, networking events and stakeholder previews; it is not a substitute for a real database.
-
-- If staying on SQLite for real, non-demo use: mount a persistent disk (e.g. on Railway, Render, or a VPS — neither Netlify nor Vercel offer a persistent disk) for the `data/` folder.
-- For real multi-user production: move to Postgres, see "Why `node:sqlite` and not Postgres/Prisma" above — the schema is already plain, portable SQL.
+**About the database on Netlify/Vercel:** because Pearl's data lives in Postgres (reached over the network) rather than a file on disk, it works correctly on serverless hosting — every function instance sees the same, real, persistent data, unlike the old SQLite-on-`/tmp` setup this project used to have (see "Database (Postgres via Neon)" above for why that was a problem).
 
 ## Owner Dashboard — seeing every business that signs up
 
@@ -137,7 +146,6 @@ Some parts require external approval steps that no AI agent can compress into a 
 - **Official WhatsApp Business API approval**: the code is real and ready (see "Connecting real integrations" above), but it can only be used after Meta approves your WhatsApp Business Account — business verification, dedicated number, typically 1-3 weeks.
 - **Google OAuth verification for scale**: connecting Gmail/Calendar works today for test users you add by hand in the Google Cloud Console; opening it to unlimited customers without that manual step requires Google's standard OAuth verification review of the same app.
 - **GDPR / DPA**: records of processing activities, a Data Processing Agreement with customers, a legal privacy notice (not a generic template).
-- **A persistent database**: this project still runs on `node:sqlite` pointed at Netlify's ephemeral `/tmp` in production (see "About the database on Netlify/Vercel" above) — fine for demos, not for real paying customers' data. Move to Postgres (Neon or Supabase both have a free tier) before relying on this for real.
 - **Tax receipts / invoices** for the now-real Ziina billing (see `ZIINA_INTEGRATION.md`) — payments work, but there's no generated PDF invoice yet.
 
 Everything else (CRM functionality, UX, pipeline, alerts, dashboard, meeting minutes) is already a working, demoable product.
@@ -150,7 +158,7 @@ src/
     owner/                AHEAD LLC's private dashboard: /owner/login, /owner/dashboard (see "Owner Dashboard" above)
   components/             React components (dashboard, pipeline kanban, landing)
   lib/
-    db.ts                 database schema + demo data seed
+    db.ts                 Postgres connection (via Neon), schema + demo data seed
     data.ts               all queries (the only place to touch to change database), incl. cross-tenant owner views
     domain.ts             product constants: pipeline stages, colors, urgency score, formatting
     auth.ts               JWT session (tenant login + separate owner login)

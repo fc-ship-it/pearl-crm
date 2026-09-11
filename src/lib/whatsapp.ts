@@ -14,8 +14,8 @@ const GRAPH_VERSION = "v21.0";
 
 export type WhatsAppCreds = { token: string; phoneNumberId: string };
 
-export function getWhatsAppCreds(orgId: string): WhatsAppCreds | null {
-  const row = getIntegration(orgId, "whatsapp");
+export async function getWhatsAppCreds(orgId: string): Promise<WhatsAppCreds | null> {
+  const row = await getIntegration(orgId, "whatsapp");
   if (!row || !row.connected || !row.access_token || !row.extra) return null;
   try {
     const extra = JSON.parse(row.extra) as { phoneNumberId?: string };
@@ -40,8 +40,8 @@ export async function verifyWhatsAppCredentials(token: string, phoneNumberId: st
   return { ok: true, displayNumber: data.display_phone_number };
 }
 
-export function saveWhatsAppCredentials(orgId: string, token: string, phoneNumberId: string, displayNumber?: string) {
-  saveIntegrationCredentials(orgId, "whatsapp", {
+export async function saveWhatsAppCredentials(orgId: string, token: string, phoneNumberId: string, displayNumber?: string) {
+  await saveIntegrationCredentials(orgId, "whatsapp", {
     accessToken: token,
     extra: { phoneNumberId, displayNumber },
   });

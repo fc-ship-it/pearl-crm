@@ -6,7 +6,7 @@ import AppShell from "@/components/AppShell";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  const org = getOrganization(session.orgId);
+  const org = await getOrganization(session.orgId);
   if (!org) redirect("/login");
   if (isAccessBlocked(org)) redirect("/billing-required");
 

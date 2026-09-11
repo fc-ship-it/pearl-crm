@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     if (!intent.redirect_url) {
       throw new Error("Ziina did not return a redirect_url");
     }
-    setPendingPaymentIntent(session.orgId, intent.id, interval);
+    await setPendingPaymentIntent(session.orgId, intent.id, interval);
     return NextResponse.json({ redirect_url: intent.redirect_url });
   } catch (err) {
     if (err instanceof ZiinaNotConfiguredError) {

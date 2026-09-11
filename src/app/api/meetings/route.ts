@@ -15,36 +15,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Title and contact are required." }, { status: 400 });
   }
 
-  const contact = db
+  const contact = (await db
     .prepare("SELECT name FROM contacts WHERE id = ? AND org_id = ?")
-    .get(body.contactId, session.orgId) as { name: string } | undefined;
+    .get(body.contactId, session.orgId)) as { name: string } | undefined;
 
   const participants = [session.name, contact?.name].filter(Boolean) as string[];
   const summary = generateVerbale(body.transcript || body.agenda || "", participants);
 
   const meetingId = id();
-  db.prepare(
-    "INSERT INTO meetings (id, org_id, contact_id, deal_id, title, date, transcript, summary_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)"
-  ).run(
-    meetingId,
-    session.orgId,
-    body.contactId,
-    body.dealId || null,
-    body.title,
-    now(),
-    body.transcript || body.agenda || null,
-    JSON.stringify(summary),
-    now()
-  );
+  await db
+    .prepare(
+      "INSERT INTO meetings (id, org_id, contact_id, deal_id, title, date, transcript, summary_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)"
+    )
+    .run(
+      meetingId,
+      session.orgId,
+      body.contactId,
+      body.dealId || null,
+      body.title,
+      now(),
+      body.transcript || body.agenda || null,
+      JSON.stringify(summary),
+      now()
+    );
 
   // Next steps automatically become linked tasks, per spec. If Google
   // Calendar is connected, each dated one also becomes a real calendar event
   // — that's the concrete payoff of connecting Calendar in Settings.
   const googleAccessToken = await getValidGoogleAccessToken(session.orgId).catch(() => null);
   for (const step of summary.nextSteps) {
-    db.prepare(
-      "INSERT INTO tasks (id, org_id, contact_id, deal_id, title, due_date, done, priority, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
-    ).run(id(), session.orgId, body.contactId, body.dealId || null, step.action, step.dueDate, 0, "medium", session.userId, now());
+    await db
+      .prepare(
+        "INSERT INTO tasks (id, org_id, contact_id, deal_id, title, due_date, done, priority, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
+      )
+      .run(id(), session.orgId, body.contactId, body.dealId || null, step.action, step.dueDate, 0, "medium", session.userId, now());
 
     if (googleAccessToken && step.dueDate) {
       const start = new Date(step.dueDate);
@@ -60,12 +64,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  db.prepare(
-    "INSERT INTO activities (id, org_id, contact_id, deal_id, type, content, occurred_at, created_at) VALUES (?,?,?,?,?,?,?,?)"
-  ).run(id(), session.orgId, body.contactId, body.dealId || null, "meeting", `Meeting: ${body.title}`, now(), now());
+  await db
+    .prepare(
+      "INSERT INTO activities (id, org_id, contact_id, deal_id, type, content, occurred_at, created_at) VALUES (?,?,?,?,?,?,?,?)"
+    )
+    .run(id(), session.orgId, body.contactId, body.dealId || null, "meeting", `Meeting: ${body.title}`, now(), now());
 
   if (body.dealId) {
-    db.prepare("UPDATE deals SET last_interaction_at = ? WHERE id = ? AND org_id = ?").run(now(), body.dealId, session.orgId);
+    await db.prepare("UPDATE deals SET last_interaction_at = ? WHERE id = ? AND org_id = ?").run(now(), body.dealId, session.orgId);
   }
 
   return NextResponse.json({ ok: true, meetingId });

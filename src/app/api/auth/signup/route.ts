@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   }
   const { orgName, name, email, password } = parsed.data;
 
-  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  const existing = await db.prepare("SELECT id FROM users WHERE email = ?").get(email);
   if (existing) {
     return NextResponse.json({ error: "An account with this email already exists." }, { status: 409 });
   }
@@ -70,24 +70,22 @@ export async function POST(req: NextRequest) {
   // confirms a card (see isAccessBlocked in src/lib/data.ts). trial_ends_at
   // is still recorded now so the legacy cron fallback has a sane value if
   // Stripe is never configured on this org for some reason.
-  db.prepare(
-    "INSERT INTO organizations (id, name, plan, trial_ends_at, promo_bonus_days, created_at, subscription_status) VALUES (?,?,?,?,?,?,?)"
-  ).run(orgId, orgName, "trial", trialEnds, 0, now(), "incomplete");
+  await db
+    .prepare(
+      "INSERT INTO organizations (id, name, plan, trial_ends_at, promo_bonus_days, created_at, subscription_status) VALUES (?,?,?,?,?,?,?)"
+    )
+    .run(orgId, orgName, "trial", trialEnds, 0, now(), "incomplete");
 
   const userId = id();
   const passwordHash = bcrypt.hashSync(password, 10);
-  db.prepare(
-    "INSERT INTO users (id, org_id, name, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)"
-  ).run(userId, orgId, name, email, passwordHash, "ADMIN", now());
+  await db
+    .prepare("INSERT INTO users (id, org_id, name, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)")
+    .run(userId, orgId, name, email, passwordHash, "ADMIN", now());
 
   for (const provider of ["gmail", "whatsapp", "calendar"]) {
-    db.prepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,?,?)").run(
-      id(),
-      orgId,
-      provider,
-      0,
-      null
-    );
+    await db
+      .prepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,?,?)")
+      .run(id(), orgId, provider, 0, null);
   }
 
   // Fire-and-forget: never block or fail signup on this notification. The

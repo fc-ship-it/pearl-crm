@@ -19,12 +19,13 @@ export async function POST(req: NextRequest) {
     targetSegment: body.targetSegment || undefined,
   };
 
-  const campaign = createCampaign(session.orgId, {
+  const campaign = await createCampaign(session.orgId, {
     title: body.title,
     message: body.message,
     channel: body.channel === "email" ? "email" : "whatsapp",
     segment,
   });
 
-  return NextResponse.json({ ok: true, campaign, audienceCount: audienceForSegment(session.orgId, segment).length });
+  const audience = await audienceForSegment(session.orgId, segment);
+  return NextResponse.json({ ok: true, campaign, audienceCount: audience.length });
 }

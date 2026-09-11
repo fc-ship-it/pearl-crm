@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No contacts to import." }, { status: 400 });
   }
 
-  const result = importContacts(
+  const result = await importContacts(
     session.orgId,
     contacts.map((c) => ({
       name: c.name,

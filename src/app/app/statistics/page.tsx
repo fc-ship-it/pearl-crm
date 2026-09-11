@@ -15,9 +15,9 @@ import { TrendingUp, Trophy, Users, Flame } from "lucide-react";
 export default async function StatisticsPage() {
   const session = await getSession();
   const orgId = session!.orgId;
-  const stats = dashboardStats(orgId);
-  const deals = listDeals(orgId);
-  const contacts = listContacts(orgId);
+  const stats = await dashboardStats(orgId);
+  const deals = await listDeals(orgId);
+  const contacts = await listContacts(orgId);
   const hotCount = contacts.filter((c) => c.temperature === "hot").length;
 
   return (

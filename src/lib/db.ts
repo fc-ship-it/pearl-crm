@@ -1,74 +1,116 @@
-// Lightweight persistence layer built on Node's built-in `node:sqlite`.
+// Persistence layer backed by real Postgres (e.g. Neon) via `pg`.
 //
-// Why not Prisma / better-sqlite3? Both need to download a native/prebuilt
-// binary at install time. In this environment that download is blocked by
-// network policy, and more importantly it's one less moving part for a demo
-// that needs to run anywhere with zero native build steps. `node:sqlite`
-// ships inside Node.js itself (stable-ish since Node 22), so `npm install`
-// is 100% pure-JS and `npm run dev` just works.
+// This used to be Node's built-in `node:sqlite`, writing to a file. That
+// worked locally but was broken in production: on Netlify (and most
+// serverless hosts) the only writable path is /tmp, and /tmp is NOT shared
+// between function instances — different requests can land on different
+// instances, each with its own empty or stale copy of the "database" file.
+// In practice that meant signups, logins, imported contacts etc. could
+// silently vanish depending on which instance handled the next request.
 //
-// For a real multi-tenant production deployment, swap this file for a
-// Postgres-backed data layer (Prisma + Postgres, or `pg` directly) — the
-// schema below is deliberately plain, portable SQL so that move is
-// mechanical. See README.md → "Dal MVP alla produzione".
+// Postgres fixes this by being a real network database: every instance talks
+// to the same server, so data written by one request is visible to the next
+// regardless of which instance handles it. Set DATABASE_URL (a Postgres
+// connection string — e.g. from Neon, Supabase, or any Postgres host) in the
+// environment; see README.md → "Database" for setup instructions.
+//
+// The `db.prepare(sql).get/.all/.run(...)` shape below is kept identical to
+// the old sqlite API on purpose — it's what every call site in this codebase
+// already uses — except every method is now async (network I/O can't be
+// synchronous), so call sites use `await`. SQL text still uses `?`
+// placeholders like sqlite; they're translated to Postgres's `$1, $2, ...`
+// automatically.
 
-import { DatabaseSync } from "node:sqlite";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { Pool, type QueryResultRow } from "pg";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 
-// On Vercel, Netlify (and most serverless hosts) the project directory is
-// read-only — only /tmp is writable, and it isn't guaranteed to persist
-// between invocations. That's fine for this SQLite-backed MVP (the demo data
-// re-seeds itself on first query, see below), but it means the working
-// directory can't be used as the data dir there. Locally (npm run dev /
-// npm start) we keep using ./data so the database survives restarts.
-//
-// We check known env vars for the platforms we've tested (Vercel, Netlify,
-// generic AWS Lambda), but platforms occasionally change these, so as a
-// safety net we also probe whether the project directory is actually
-// writable and fall back to /tmp if it isn't — that way a host we haven't
-// explicitly named still doesn't crash the app with an EROFS/EACCES error.
-const IS_SERVERLESS =
-  !!process.env.VERCEL || !!process.env.NETLIFY || !!process.env.AWS_LAMBDA_FUNCTION_NAME || !canWrite(path.join(process.cwd(), "data"));
+const connectionString = process.env.DATABASE_URL;
 
-function canWrite(dir: string): boolean {
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.accessSync(dir, fs.constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
+if (!connectionString) {
+  // Fail loudly and immediately rather than limping along with an
+  // undefined pool that would throw a cryptic error on the first query —
+  // every environment (local dev, Netlify) must set this.
+  throw new Error(
+    "DATABASE_URL is not set. Pearl needs a Postgres connection string (e.g. from Neon) — see README.md → \"Database\"."
+  );
 }
 
-const DATA_DIR = IS_SERVERLESS ? path.join(os.tmpdir(), "pearl-data") : path.join(process.cwd(), "data");
-const DB_PATH = path.join(DATA_DIR, "app.db");
+// Local Postgres (no TLS) vs. hosted providers like Neon (require TLS) both
+// need to work: only send `ssl` when the connection string isn't pointing at
+// localhost, since requesting SSL against a local dev Postgres fails.
+const isLocal = /localhost|127\.0\.0\.1/.test(connectionString);
 
 declare global {
   // eslint-disable-next-line no-var
-  var __pearlDb: DatabaseSync | undefined;
+  var __pearlPool: Pool | undefined;
 }
 
-function openDb(): DatabaseSync {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const db = new DatabaseSync(DB_PATH);
-  db.exec("PRAGMA journal_mode = WAL;");
-  db.exec("PRAGMA foreign_keys = ON;");
-  // Next.js builds collect page data across several parallel worker
-  // processes; each one imports this module and — on a brand-new database —
-  // races to run the one-time demo seed below. Without a busy timeout, a
-  // worker that loses that race gets an immediate "database is locked"
-  // error instead of simply waiting its turn, which intermittently failed
-  // production builds. 5s is comfortably longer than the seed insert takes.
-  db.exec("PRAGMA busy_timeout = 5000;");
-  return db;
+// Reused across hot invocations of the same warm serverless instance (and
+// across Next.js dev-server hot reloads) so we don't leak connections — a
+// fresh `new Pool()` per request would exhaust Postgres's connection limit
+// under any real load. `max: 3` keeps each function instance's footprint
+// small since serverless can run many instances concurrently.
+const pool: Pool =
+  globalThis.__pearlPool ??
+  new Pool({
+    connectionString,
+    ssl: isLocal ? undefined : { rejectUnauthorized: false },
+    max: 3,
+  });
+globalThis.__pearlPool = pool;
+
+function toPgSql(sql: string): string {
+  let i = 0;
+  // sqlite-style positional `?` -> Postgres-style `$1, $2, ...`. Simple and
+  // safe here because none of this codebase's SQL contains a literal `?`
+  // character inside a string/quote.
+  return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-export const db: DatabaseSync = globalThis.__pearlDb ?? openDb();
-if (process.env.NODE_ENV !== "production") globalThis.__pearlDb = db;
+class Statement {
+  // `skipReadyGate` is only used internally by seedDemoData below, which
+  // runs DURING initDb() itself — awaiting `ready()` there would deadlock
+  // (it would be waiting on the very initialization it's part of). Every
+  // other caller (all of src/lib/data.ts and the API routes) goes through
+  // the normal gated path.
+  constructor(private sqlText: string, private skipReadyGate = false) {}
+
+  async run(...params: unknown[]): Promise<{ changes: number }> {
+    if (!this.skipReadyGate) await ready();
+    const r = await pool.query(toPgSql(this.sqlText), params);
+    return { changes: r.rowCount ?? 0 };
+  }
+
+  async get<T extends QueryResultRow = any>(...params: unknown[]): Promise<T | undefined> {
+    if (!this.skipReadyGate) await ready();
+    const r = await pool.query<T>(toPgSql(this.sqlText), params);
+    return r.rows[0];
+  }
+
+  async all<T extends QueryResultRow = any>(...params: unknown[]): Promise<T[]> {
+    if (!this.skipReadyGate) await ready();
+    const r = await pool.query<T>(toPgSql(this.sqlText), params);
+    return r.rows;
+  }
+}
+
+export const db = {
+  prepare(sqlText: string): Statement {
+    return new Statement(sqlText);
+  },
+  async exec(sqlText: string): Promise<void> {
+    await pool.query(sqlText);
+  },
+};
+
+/** Used only inside this file's own seedDemoData (which runs as part of
+ * initDb itself) to avoid the ready()-awaits-itself deadlock described
+ * above. Not exported — nothing outside this file should ever bypass the
+ * ready() gate. */
+function rawPrepare(sqlText: string): Statement {
+  return new Statement(sqlText, true);
+}
 
 export const id = () => crypto.randomUUID();
 export const now = () => new Date().toISOString();
@@ -210,63 +252,52 @@ CREATE TABLE IF NOT EXISTS integrations (
 );
 `;
 
-db.exec(SCHEMA);
+async function columnsOf(table: string): Promise<string[]> {
+  const r = await pool.query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
+    [table]
+  );
+  return r.rows.map((row) => row.column_name);
+}
 
-// ---- lightweight migration guard --------------------------------------
-// Adds new contact columns to a database created before this feature
-// shipped, so an existing local data/app.db doesn't need to be deleted.
-(function migrateContactColumns() {
-  const cols = (db.prepare("PRAGMA table_info(contacts)").all() as { name: string }[]).map((c) => c.name);
-  const wanted: Array<[string, string]> = [
+async function addMissingColumns(table: string, wanted: Array<[string, string]>): Promise<void> {
+  const cols = await columnsOf(table);
+  for (const [name, ddl] of wanted) {
+    if (!cols.includes(name)) await pool.query(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl};`);
+  }
+}
+
+// Module-level async init, run exactly once per warm process (dev server or
+// serverless instance) and awaited by every caller via `ready` below before
+// touching the database — Postgres schema setup is inherently async, unlike
+// the old synchronous sqlite version, so every consumer needs to wait for it
+// at least once.
+let initPromise: Promise<void> | null = null;
+
+async function initDb(): Promise<void> {
+  await pool.query(SCHEMA);
+
+  // ---- lightweight migration guards -------------------------------------
+  // Add columns to a database created before a given feature shipped, so an
+  // existing Postgres database doesn't need to be recreated from scratch.
+  await addMissingColumns("contacts", [
     ["interest", "TEXT"],
     ["budget_tier", "TEXT"],
     ["target_segment", "TEXT"],
     ["source", "TEXT NOT NULL DEFAULT 'manual'"],
     ["temperature", "TEXT"],
-  ];
-  for (const [name, ddl] of wanted) {
-    if (!cols.includes(name)) db.exec(`ALTER TABLE contacts ADD COLUMN ${name} ${ddl};`);
-  }
-})();
-
-// Reminders originally covered only generic "custom alerts". Calls and
-// appointments were added later as typed reminders that can optionally point
-// at the contact they're about, so older databases need both columns added.
-(function migrateAlertColumns() {
-  const cols = (db.prepare("PRAGMA table_info(custom_alerts)").all() as { name: string }[]).map((c) => c.name);
-  const wanted: Array<[string, string]> = [
+  ]);
+  await addMissingColumns("custom_alerts", [
     ["kind", "TEXT NOT NULL DEFAULT 'general'"],
     ["contact_id", "TEXT REFERENCES contacts(id)"],
-  ];
-  for (const [name, ddl] of wanted) {
-    if (!cols.includes(name)) db.exec(`ALTER TABLE custom_alerts ADD COLUMN ${name} ${ddl};`);
-  }
-})();
-
-// Same idea for integrations: real OAuth tokens (Google) and API credentials
-// (WhatsApp) were added after the first version shipped with just a
-// connected/disconnected flag.
-(function migrateIntegrationColumns() {
-  const cols = (db.prepare("PRAGMA table_info(integrations)").all() as { name: string }[]).map((c) => c.name);
-  const wanted: Array<[string, string]> = [
+  ]);
+  await addMissingColumns("integrations", [
     ["access_token", "TEXT"],
     ["refresh_token", "TEXT"],
     ["token_expiry", "TEXT"],
     ["extra", "TEXT"],
-  ];
-  for (const [name, ddl] of wanted) {
-    if (!cols.includes(name)) db.exec(`ALTER TABLE integrations ADD COLUMN ${name} ${ddl};`);
-  }
-})();
-
-// Real Ziina-backed billing: which interval an org pays for, when the
-// current paid (or trial) period actually runs out, a coarse status used to
-// gate access, a grace deadline before that gate closes, and bookkeeping for
-// the Ziina payment intent behind the most recent renewal so a webhook and a
-// success-page check can't both apply the same payment twice.
-(function migrateBillingColumns() {
-  const cols = (db.prepare("PRAGMA table_info(organizations)").all() as { name: string }[]).map((c) => c.name);
-  const wanted: Array<[string, string]> = [
+  ]);
+  await addMissingColumns("organizations", [
     ["billing_interval", "TEXT"],
     ["billing_period_end", "TEXT"],
     ["subscription_status", "TEXT NOT NULL DEFAULT 'trialing'"],
@@ -277,29 +308,34 @@ db.exec(SCHEMA);
     ["stripe_customer_id", "TEXT"],
     ["stripe_subscription_id", "TEXT"],
     ["stripe_cancel_at_period_end", "INTEGER NOT NULL DEFAULT 0"],
-  ];
-  for (const [name, ddl] of wanted) {
-    if (!cols.includes(name)) db.exec(`ALTER TABLE organizations ADD COLUMN ${name} ${ddl};`);
-  }
-})();
+  ]);
 
-// ---- one-time demo seed -----------------------------------------------
-const orgCount = (db.prepare("SELECT COUNT(*) as c FROM organizations").get() as { c: number }).c;
-if (orgCount === 0) {
-  seedDemoData();
+  // ---- one-time demo seed ------------------------------------------------
+  const { rows } = await pool.query<{ c: string }>("SELECT COUNT(*) as c FROM organizations");
+  if (Number(rows[0].c) === 0) {
+    await seedDemoData();
+  }
 }
 
-function seedDemoData() {
+/** Every module that touches the database awaits this once before its first
+ * query, guaranteeing the schema/migrations/seed above have already run —
+ * required now that setup is async (it used to run synchronously at import
+ * time with the old sqlite driver). Safe to await repeatedly; the same
+ * promise is reused. */
+export function ready(): Promise<void> {
+  if (!initPromise) initPromise = initDb();
+  return initPromise;
+}
+
+async function seedDemoData(): Promise<void> {
   const orgId = id();
   const trialEnds = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
-  db.prepare(
-    "INSERT INTO organizations (id, name, plan, trial_ends_at, promo_bonus_days, created_at) VALUES (?,?,?,?,?,?)"
-  ).run(orgId, "Pearl Demo", "trial", trialEnds, 0, now());
+  await rawPrepare("INSERT INTO organizations (id, name, plan, trial_ends_at, promo_bonus_days, created_at) VALUES (?,?,?,?,?,?)")
+    .run(orgId, "Pearl Demo", "trial", trialEnds, 0, now());
 
   const userId = id();
-  db.prepare(
-    "INSERT INTO users (id, org_id, name, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)"
-  ).run(userId, orgId, "Federica Camurri", "demo@pearlcrm.ae", bcrypt.hashSync("demo1234", 10), "ADMIN", now());
+  await rawPrepare("INSERT INTO users (id, org_id, name, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)")
+    .run(userId, orgId, "Federica Camurri", "demo@pearlcrm.ae", bcrypt.hashSync("demo1234", 10), "ADMIN", now());
 
   const companies = [
     { name: "Azure Bay Hotels Group", sector: "Hospitality", website: "azurebayhotels.ae" },
@@ -309,9 +345,10 @@ function seedDemoData() {
     { name: "Dubai Silicon Ventures", sector: "Tech / Venture", website: "dsventures.ae" },
     { name: "Falcon Industrial Systems", sector: "Industrial Systems", website: "falconindustrial.ae" },
   ];
-  const companyIds = companies.map((c) => {
+  const companyIds: string[] = [];
+  for (const c of companies) {
     const cid = id();
-    db.prepare("INSERT INTO companies (id, org_id, name, sector, website, created_at) VALUES (?,?,?,?,?,?)").run(
+    await rawPrepare("INSERT INTO companies (id, org_id, name, sector, website, created_at) VALUES (?,?,?,?,?,?)").run(
       cid,
       orgId,
       c.name,
@@ -319,8 +356,8 @@ function seedDemoData() {
       c.website,
       now()
     );
-    return cid;
-  });
+    companyIds.push(cid);
+  }
 
   const contactsSeed = [
     { name: "James Carter", email: "j.carter@azurebayhotels.ae", phone: "+971 50 111 2233", company: 0, interest: "Hotel management software", budgetTier: "medium", targetSegment: "Hospitality", source: "manual" },
@@ -332,13 +369,14 @@ function seedDemoData() {
     { name: "Olivia Grant", email: "o.grant@azurebayhotels.ae", phone: "+971 56 555 1122", company: 0, interest: "Smart room upgrades", budgetTier: "low", targetSegment: "Hospitality", source: "whatsapp-qr" },
     { name: "Youssef Haddad", email: "youssef@alwahatrading.ae", phone: "+971 52 456 7890", company: 2, interest: "MENA distribution", budgetTier: "high", targetSegment: "Retail", source: "qr" },
   ];
-  const contactIds = contactsSeed.map((c) => {
+  const contactIds: string[] = [];
+  for (const c of contactsSeed) {
     const ctid = id();
-    db.prepare(
+    await rawPrepare(
       "INSERT INTO contacts (id, org_id, company_id, name, email, phone, tags, interest, budget_tier, target_segment, source, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
     ).run(ctid, orgId, companyIds[c.company], c.name, c.email, c.phone, "[]", c.interest, c.budgetTier, c.targetSegment, c.source, userId, now());
-    return ctid;
-  });
+    contactIds.push(ctid);
+  }
 
   const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 3600 * 1000).toISOString();
 
@@ -352,26 +390,27 @@ function seedDemoData() {
     { title: "Smart room suite upgrade", contact: 6, company: 0, value: 30000, stage: "closed_won", prob: 100, lastInteraction: 45 },
     { title: "MENA distribution - phase 2", contact: 7, company: 2, value: 225000, stage: "negotiation", prob: 60, lastInteraction: 6 },
   ];
-  const dealIds = dealsSeed.map((d) => {
+  const dealIds: string[] = [];
+  for (const d of dealsSeed) {
     const did = id();
-    db.prepare(
+    await rawPrepare(
       "INSERT INTO deals (id, org_id, contact_id, company_id, title, value, stage, probability, owner_id, expected_close_date, last_interaction_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
     ).run(
-      did,
-      orgId,
-      contactIds[d.contact],
-      companyIds[d.company],
-      d.title,
-      d.value,
-      d.stage,
-      d.prob,
-      userId,
-      daysAgo(-20),
-      daysAgo(d.lastInteraction),
-      daysAgo(d.lastInteraction + 10)
-    );
-    return did;
-  });
+        did,
+        orgId,
+        contactIds[d.contact],
+        companyIds[d.company],
+        d.title,
+        d.value,
+        d.stage,
+        d.prob,
+        userId,
+        daysAgo(-20),
+        daysAgo(d.lastInteraction),
+        daysAgo(d.lastInteraction + 10)
+      );
+    dealIds.push(did);
+  }
 
   const activityTypes: Array<[string, string]> = [
     ["email", "Email sent: commercial proposal recap"],
@@ -380,15 +419,16 @@ function seedDemoData() {
     ["meeting", "Meeting at the client's office"],
     ["note", "Internal note: watch Q3 budget under review"],
   ];
-  dealIds.forEach((dealId, i) => {
+  for (let i = 0; i < dealIds.length; i++) {
+    const dealId = dealIds[i];
     const contactId = contactIds[dealsSeed[i].contact];
     for (let k = 0; k < 3; k++) {
       const [type, content] = activityTypes[(i + k) % activityTypes.length];
-      db.prepare(
+      await rawPrepare(
         "INSERT INTO activities (id, org_id, contact_id, deal_id, type, content, occurred_at, created_at) VALUES (?,?,?,?,?,?,?,?)"
       ).run(id(), orgId, contactId, dealId, type, content, daysAgo(dealsSeed[i].lastInteraction + k * 4), now());
     }
-  });
+  }
 
   const tasksSeed = [
     { title: "Call James Carter back for proposal follow-up", due: -1, deal: 0, contact: 0, priority: "high" },
@@ -397,11 +437,11 @@ function seedDemoData() {
     { title: "Review contract with legal team", due: 2, deal: 4, contact: 4, priority: "medium" },
     { title: "Follow up after meeting with Michael Ferraro", due: 0, deal: 5, contact: 5, priority: "low" },
   ];
-  tasksSeed.forEach((t) => {
-    db.prepare(
+  for (const t of tasksSeed) {
+    await rawPrepare(
       "INSERT INTO tasks (id, org_id, contact_id, deal_id, title, due_date, done, priority, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
     ).run(id(), orgId, contactIds[t.contact], dealIds[t.deal], t.title, daysAgo(-t.due), 0, t.priority, userId, now());
-  });
+  }
 
   const meetingSummary = {
     participants: ["Federica Camurri", "Sara Al Qassimi"],
@@ -417,62 +457,38 @@ function seedDemoData() {
       { action: "Collect financial statements for the last 2 years", owner: "Sara Al Qassimi", dueDate: daysAgo(-7) },
     ],
   };
-  db.prepare(
-    "INSERT INTO meetings (id, org_id, contact_id, deal_id, title, date, transcript, summary_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)"
-  ).run(
-    id(),
-    orgId,
-    contactIds[4],
-    dealIds[4],
-    "Seed investment call - first meeting",
-    daysAgo(5),
-    null,
-    JSON.stringify(meetingSummary),
-    now()
-  );
+  await rawPrepare(
+      "INSERT INTO meetings (id, org_id, contact_id, deal_id, title, date, transcript, summary_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)"
+    )
+    .run(id(), orgId, contactIds[4], dealIds[4], "Seed investment call - first meeting", daysAgo(5), null, JSON.stringify(meetingSummary), now());
 
-  db.prepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,?,?)").run(
-    id(),
-    orgId,
-    "gmail",
-    1,
-    daysAgo(12)
-  );
-  db.prepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,?,?)").run(
-    id(),
-    orgId,
-    "calendar",
-    1,
-    daysAgo(12)
-  );
-  db.prepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,?,?)").run(
-    id(),
-    orgId,
-    "whatsapp",
-    0,
-    null
-  );
+  await rawPrepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,?,?)")
+    .run(id(), orgId, "gmail", 1, daysAgo(12));
+  await rawPrepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,?,?)")
+    .run(id(), orgId, "calendar", 1, daysAgo(12));
+  await rawPrepare("INSERT INTO integrations (id, org_id, provider, connected, connected_at) VALUES (?,?,?,?,?)")
+    .run(id(), orgId, "whatsapp", 0, null);
 
-  db.prepare(
-    "INSERT INTO campaigns (id, org_id, title, message, channel, segment_interest, segment_budget_tier, segment_target_segment, status, recipient_count, created_at, sent_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
-  ).run(
-    id(),
-    orgId,
-    "Ramadan hospitality offer",
-    "Salam! For Ramadan we're offering a 20% discount on annual contracts renewed this month. Reply to this message to lock in your rate.",
-    "whatsapp",
-    null,
-    null,
-    "Hospitality",
-    "sent",
-    2,
-    daysAgo(10),
-    daysAgo(10)
-  );
+  await rawPrepare(
+      "INSERT INTO campaigns (id, org_id, title, message, channel, segment_interest, segment_budget_tier, segment_target_segment, status, recipient_count, created_at, sent_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+    )
+    .run(
+      id(),
+      orgId,
+      "Ramadan hospitality offer",
+      "Salam! For Ramadan we're offering a 20% discount on annual contracts renewed this month. Reply to this message to lock in your rate.",
+      "whatsapp",
+      null,
+      null,
+      "Hospitality",
+      "sent",
+      2,
+      daysAgo(10),
+      daysAgo(10)
+    );
 
-  db.prepare(
-    "INSERT INTO custom_alerts (id, org_id, title, remind_at, done, created_at) VALUES (?,?,?,?,?,?)"
-  ).run(id(), orgId, "Follow up on Q3 renewal promo with high-budget hospitality accounts", daysAgo(-2), 0, now());
+  await rawPrepare("INSERT INTO custom_alerts (id, org_id, title, remind_at, done, created_at) VALUES (?,?,?,?,?,?)")
+    .run(id(), orgId, "Follow up on Q3 renewal promo with high-budget hospitality accounts", daysAgo(-2), 0, now());
 
   // eslint-disable-next-line no-console
   console.log("[ahead-pearl] Demo data seeded. Login: demo@pearlcrm.ae / demo1234");
