@@ -177,16 +177,21 @@ export default function AppShell({
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0" style={{ background: "rgba(21,27,46,0.5)" }} onClick={() => setMenuOpen(false)} />
           <div className="absolute inset-y-0 left-0 w-[80vw] max-w-[280px] flex flex-col" style={{ background: "var(--panel)" }}>
-            <div className="h-16 shrink-0 flex items-center justify-between gap-2 px-5 border-b" style={{ borderColor: "var(--border)" }}>
-              <div className="flex items-center gap-2">
-                <Image src="/brand/pearl-logo-64.png" alt="" width={22} height={22} />
-                <span className="font-display text-sm tracking-wide" style={{ color: "var(--ink)" }}>
-                  PEARL
-                </span>
+            <div
+              className="shrink-0 border-b pt-[calc(env(safe-area-inset-top,0px)+5mm)]"
+              style={{ borderColor: "var(--border)" }}
+            >
+              <div className="h-16 flex items-center justify-between gap-2 px-5">
+                <div className="flex items-center gap-2">
+                  <Image src="/brand/pearl-logo-64.png" alt="" width={22} height={22} />
+                  <span className="font-display text-sm tracking-wide" style={{ color: "var(--ink)" }}>
+                    PEARL
+                  </span>
+                </div>
+                <button onClick={() => setMenuOpen(false)} aria-label="Close menu">
+                  <X size={20} color="var(--ink-dim)" />
+                </button>
               </div>
-              <button onClick={() => setMenuOpen(false)} aria-label="Close menu">
-                <X size={20} color="var(--ink-dim)" />
-              </button>
             </div>
             {navLinks(() => setMenuOpen(false))}
             <div className="p-3 border-t shrink-0" style={{ borderColor: "var(--border)" }}>
@@ -205,29 +210,31 @@ export default function AppShell({
 
       <div className="flex-1 flex flex-col min-w-0">
         <header
-          className="h-16 shrink-0 flex items-center justify-between px-4 md:px-6 border-b gap-3"
+          className="shrink-0 border-b pt-[calc(env(safe-area-inset-top,0px)+5mm)] md:pt-0"
           style={{ borderColor: "var(--border)" }}
         >
-          <div className="flex items-center gap-3 min-w-0">
-            <button className="md:hidden shrink-0" onClick={() => setMenuOpen(true)} aria-label="Open menu">
-              <Menu size={22} color="var(--ink)" />
-            </button>
-            <div className="text-sm truncate" style={{ color: "var(--ink-dim)" }}>
-              {orgName}
-            </div>
-          </div>
-          <div className="flex items-center gap-3 md:gap-4 shrink-0">
-            <ReminderNotifier />
-            <div className="flex items-center gap-2">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                style={{ background: "var(--gold)", color: "var(--ink)" }}
-              >
-                {initials}
+          <div className="h-16 flex items-center justify-between px-4 md:px-6 gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <button className="md:hidden shrink-0" onClick={() => setMenuOpen(true)} aria-label="Open menu">
+                <Menu size={22} color="var(--ink)" />
+              </button>
+              <div className="text-sm truncate" style={{ color: "var(--ink-dim)" }}>
+                {orgName}
               </div>
-              <span className="text-sm hidden sm:inline" style={{ color: "var(--ink)" }}>
-                {userName}
-              </span>
+            </div>
+            <div className="flex items-center gap-3 md:gap-4 shrink-0">
+              <ReminderNotifier />
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                  style={{ background: "var(--gold)", color: "var(--ink)" }}
+                >
+                  {initials}
+                </div>
+                <span className="text-sm hidden sm:inline" style={{ color: "var(--ink)" }}>
+                  {userName}
+                </span>
+              </div>
             </div>
           </div>
         </header>
