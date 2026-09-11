@@ -4,6 +4,7 @@ import { getContact, listActivitiesForContact, listDealsForContact } from "@/lib
 import { formatCurrency, relativeDaysLabel, initials, avatarColor, ACTIVITY_LABELS, stageConfig, urgencyScore, urgencyLevel, URGENCY_COLORS, budgetTierConfig, contactSourceConfig } from "@/lib/domain";
 import { Mail, Phone, MessageCircle, Users as UsersIcon, StickyNote } from "lucide-react";
 import LeadTemperaturePicker from "@/components/LeadTemperaturePicker";
+import DeleteContactButton from "@/components/DeleteContactButton";
 
 const ICONS: Record<string, any> = { mail: Mail, phone: Phone, "message-circle": MessageCircle, users: UsersIcon, "sticky-note": StickyNote };
 
@@ -18,8 +19,9 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
 
   return (
     <div className="max-w-[1000px] space-y-5">
-      <div className="flex items-center gap-4">
-        <div
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div
           className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold shrink-0"
           style={{ background: avatarColor(contact.name), color: "var(--ink)" }}
         >
@@ -59,6 +61,8 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
             <LeadTemperaturePicker contactId={contact.id} value={contact.temperature} />
           </div>
         </div>
+      </div>
+        <DeleteContactButton contactId={contact.id} contactName={contact.name} redirectTo="/app/contacts" size="md" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

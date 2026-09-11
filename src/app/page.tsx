@@ -85,7 +85,7 @@ export default function LandingPage() {
               Start your free trial <ArrowRight size={16} />
             </Link>
             <Link href="/login" className="btn-glow flex items-center gap-2 px-5 py-3 rounded-xl text-sm" style={{ border: "1px solid var(--border)", color: "var(--ink)" }}>
-              Try the demo
+              Log in
             </Link>
           </div>
           <div className="flex items-center gap-2 mt-6 text-xs" style={{ color: "var(--ink-dim)" }}>

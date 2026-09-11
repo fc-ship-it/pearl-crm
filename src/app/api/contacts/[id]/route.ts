@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { setContactTemperature, LEAD_TEMPERATURES } from "@/lib/data";
+import { setContactTemperature, deleteContact, LEAD_TEMPERATURES } from "@/lib/data";
 
 export const runtime = "nodejs";
 
@@ -20,5 +20,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await setContactTemperature(session.orgId, id, temp);
   }
 
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const { id } = await params;
+  await deleteContact(session.orgId, id);
   return NextResponse.json({ ok: true });
 }

@@ -4,6 +4,7 @@ import { listContacts } from "@/lib/data";
 import { formatCurrency, relativeDaysLabel, initials, avatarColor, budgetTierConfig, contactSourceConfig } from "@/lib/domain";
 import { Plus, Filter } from "lucide-react";
 import LeadTemperaturePicker from "@/components/LeadTemperaturePicker";
+import DeleteContactButton from "@/components/DeleteContactButton";
 
 export default async function ContactsPage({
   searchParams,
@@ -76,7 +77,7 @@ export default async function ContactsPage({
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
-              {["Contact", "Company", "Qualification", "Lead", "Open deals", "Value", "Last interaction"].map((h) => (
+              {["Contact", "Company", "Qualification", "Lead", "Open deals", "Value", "Last interaction", ""].map((h) => (
                 <th key={h} className="text-left px-4 py-3 font-normal whitespace-nowrap" style={{ color: "var(--ink-dim)" }}>
                   {h}
                 </th>
@@ -142,12 +143,15 @@ export default async function ContactsPage({
                   <td className="px-4 py-3 whitespace-nowrap" style={{ color: "var(--ink-dim)" }}>
                     {c.lastInteractionAt ? relativeDaysLabel(c.lastInteractionAt) : "—"}
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    <DeleteContactButton contactId={c.id} contactName={c.name} />
+                  </td>
                 </tr>
               );
             })}
             {contacts.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: "var(--ink-dim)" }}>
+                <td colSpan={8} className="px-4 py-8 text-center text-sm" style={{ color: "var(--ink-dim)" }}>
                   No contacts match these filters.
                 </td>
               </tr>

@@ -212,6 +212,25 @@ export async function setContactTemperature(orgId: string, contactId: string, te
   await db.prepare("UPDATE contacts SET temperature = ? WHERE org_id = ? AND id = ?").run(temperature, orgId, contactId);
 }
 
+/**
+ * Deletes a contact and everything that only makes sense attached to that
+ * contact (its logged activities, its tasks, its meetings, its reminders).
+ * Deals are kept but detached (contact_id set to null) rather than deleted,
+ * since a deal is a financial record worth preserving even if the contact
+ * behind it goes away. All of this has to happen before the DELETE on
+ * `contacts` itself, since every one of those tables has a foreign key
+ * pointing at it and Postgres (unlike the old SQLite driver) actually
+ * enforces that at commit time.
+ */
+export async function deleteContact(orgId: string, contactId: string): Promise<void> {
+  await db.prepare("DELETE FROM activities WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
+  await db.prepare("DELETE FROM tasks WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
+  await db.prepare("DELETE FROM meetings WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
+  await db.prepare("DELETE FROM custom_alerts WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
+  await db.prepare("UPDATE deals SET contact_id = NULL WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
+  await db.prepare("DELETE FROM contacts WHERE org_id = ? AND id = ?").run(orgId, contactId);
+}
+
 export async function listContacts(orgId: string, filters: ContactFilters = {}): Promise<Contact[]> {
   const clauses = ["ct.org_id = ?"];
   const params: any[] = [orgId];

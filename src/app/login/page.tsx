@@ -67,17 +67,6 @@ function LoginForm() {
           <button type="submit" disabled={loading} className="w-full py-2.5 rounded-xl text-sm font-medium disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
             {loading ? "Logging in…" : "Log in"}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setEmail("demo@pearlcrm.ae");
-              setPassword("demo1234");
-            }}
-            className="w-full py-2 rounded-xl text-xs"
-            style={{ border: "1px solid var(--border)", color: "var(--ink-dim)" }}
-          >
-            Use demo credentials
-          </button>
         </form>
         <p className="text-center text-sm mt-4" style={{ color: "var(--ink-dim)" }}>
           Don&apos;t have an account?{" "}

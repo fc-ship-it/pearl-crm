@@ -315,6 +315,40 @@ async function initDb(): Promise<void> {
   if (Number(rows[0].c) === 0) {
     await seedDemoData();
   }
+
+  // ---- enrich the demo with more data (hot/cold leads, fuller pipeline) --
+  // Runs on every startup but only ever acts once, guarded by the marker
+  // row it inserts at the very end — see enrichDemoDataOnce() below.
+  await enrichDemoDataOnce();
+
+  // ---- lock down the old, publicly-known demo password -------------------
+  // The demo account used to ship with a password shown right on the login
+  // page ("Use demo credentials" button), which meant anyone who found the
+  // live site could log in as it. That button is gone from the UI now, but
+  // a database that was already seeded before this change still has the
+  // old password hash sitting in it. This runs on every startup, but only
+  // ever *acts* the one time it finds the old hash still in place — once
+  // it's swapped to the new password (or Federica changes it herself to
+  // something else), bcrypt.compareSync below stops matching and this is a
+  // no-op forever after.
+  await rotateKnownDemoPassword();
+}
+
+const OLD_PUBLIC_DEMO_PASSWORD = "demo1234";
+const NEW_DEMO_PASSWORD = "Falco9831#Pearl";
+
+async function rotateKnownDemoPassword(): Promise<void> {
+  const { rows } = await pool.query<{ id: string; password_hash: string }>(
+    "SELECT id, password_hash FROM users WHERE email = $1",
+    ["demo@pearlcrm.ae"]
+  );
+  const demoUser = rows[0];
+  if (!demoUser) return;
+  if (bcrypt.compareSync(OLD_PUBLIC_DEMO_PASSWORD, demoUser.password_hash)) {
+    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [bcrypt.hashSync(NEW_DEMO_PASSWORD, 10), demoUser.id]);
+    // eslint-disable-next-line no-console
+    console.log("[ahead-pearl] Rotated demo account password away from the old public default.");
+  }
 }
 
 /** Every module that touches the database awaits this once before its first
@@ -335,7 +369,7 @@ async function seedDemoData(): Promise<void> {
 
   const userId = id();
   await rawPrepare("INSERT INTO users (id, org_id, name, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)")
-    .run(userId, orgId, "Federica Camurri", "demo@pearlcrm.ae", bcrypt.hashSync("demo1234", 10), "ADMIN", now());
+    .run(userId, orgId, "Federica Camurri", "demo@pearlcrm.ae", bcrypt.hashSync(NEW_DEMO_PASSWORD, 10), "ADMIN", now());
 
   const companies = [
     { name: "Azure Bay Hotels Group", sector: "Hospitality", website: "azurebayhotels.ae" },
@@ -491,5 +525,306 @@ async function seedDemoData(): Promise<void> {
     .run(id(), orgId, "Follow up on Q3 renewal promo with high-budget hospitality accounts", daysAgo(-2), 0, now());
 
   // eslint-disable-next-line no-console
-  console.log("[ahead-pearl] Demo data seeded. Login: demo@pearlcrm.ae / demo1234");
+  console.log("[ahead-pearl] Demo data seeded for demo@pearlcrm.ae (password set in NEW_DEMO_PASSWORD, not printed here).");
+}
+
+const DEMO_ENRICHMENT_MARKER_ID = "demo-enrichment-v1";
+
+/**
+ * Adds a second wave of demo content on top of whatever seedDemoData
+ * produced: more contacts with a real spread of hot/warm/cold lead
+ * temperatures, more deals across every pipeline stage (including
+ * closed_won/closed_lost, which the original seed never used), more
+ * activities/tasks/meetings/campaigns/alerts — so every screen (dashboard,
+ * pipeline, contacts, statistics, campaigns) looks like a live, busy CRM
+ * instead of a handful of placeholder rows.
+ *
+ * This runs on every server start (initDb runs on every cold start on
+ * Netlify's serverless functions, not just once ever), so it has to be
+ * idempotent against a database that's already been through it — that's
+ * what DEMO_ENRICHMENT_MARKER_ID is for: a fixed (not random) primary key
+ * inserted as the very last step, checked as the very first step.
+ */
+async function enrichDemoDataOnce(): Promise<void> {
+  const marker = await pool.query("SELECT 1 FROM custom_alerts WHERE id = $1", [DEMO_ENRICHMENT_MARKER_ID]);
+  if ((marker.rowCount ?? 0) > 0) return;
+
+  const orgRow = await pool.query<{ id: string }>("SELECT id FROM organizations WHERE name = $1 LIMIT 1", ["Pearl Demo"]);
+  const orgId = orgRow.rows[0]?.id;
+  if (!orgId) return; // not a demo deployment (or the demo org was renamed/deleted) - nothing to enrich
+
+  const userRow = await pool.query<{ id: string }>("SELECT id FROM users WHERE org_id = $1 AND email = $2 LIMIT 1", [orgId, "demo@pearlcrm.ae"]);
+  const userId = userRow.rows[0]?.id;
+  if (!userId) return;
+
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 3600 * 1000).toISOString();
+
+  // Give the original 8 seed contacts a temperature too, so hot/warm/cold
+  // isn't only found among the newly-added ones below.
+  const existingTemps: Record<string, "hot" | "warm" | "cold"> = {
+    "j.carter@azurebayhotels.ae": "warm",
+    "e.novak@meridianprecision.ae": "hot",
+    "ahmed@alwahatrading.ae": "hot",
+    "l.bennett@greenpack.ae": "cold",
+    "sara@dsventures.ae": "warm",
+    "m.ferraro@falconindustrial.ae": "cold",
+    "o.grant@azurebayhotels.ae": "cold",
+    "youssef@alwahatrading.ae": "hot",
+  };
+  for (const [email, temp] of Object.entries(existingTemps)) {
+    await pool.query("UPDATE contacts SET temperature = $1 WHERE org_id = $2 AND email = $3", [temp, orgId, email]);
+  }
+
+  const newCompanies = [
+    { name: "Coral Reef Resorts", sector: "Hospitality", website: "coralreefresorts.ae" },
+    { name: "Desert Rose Logistics", sector: "Logistics", website: "desertroselogistics.ae" },
+    { name: "BrightPath Education Group", sector: "Education", website: "brightpatheducation.ae" },
+    { name: "Lumen Health Clinics", sector: "Healthcare", website: "lumenhealthclinics.ae" },
+    { name: "Zenith Real Estate", sector: "Real Estate", website: "zenithrealestate.ae" },
+    { name: "Orion FinTech Solutions", sector: "FinTech", website: "orionfintech.ae" },
+  ];
+  const newCompanyIds: string[] = [];
+  for (const c of newCompanies) {
+    const cid = id();
+    await pool.query("INSERT INTO companies (id, org_id, name, sector, website, created_at) VALUES ($1,$2,$3,$4,$5,$6)", [
+      cid,
+      orgId,
+      c.name,
+      c.sector,
+      c.website,
+      now(),
+    ]);
+    newCompanyIds.push(cid);
+  }
+
+  // The 6 companies from the original seed, looked up by name so this
+  // works regardless of when/where seedDemoData ran.
+  const existingCompanyNames = [
+    "Azure Bay Hotels Group",
+    "Meridian Precision Engineering",
+    "Al Waha Trading LLC",
+    "GreenPack Packaging",
+    "Dubai Silicon Ventures",
+    "Falcon Industrial Systems",
+  ];
+  const existingCompanyIds: string[] = [];
+  for (const cname of existingCompanyNames) {
+    const r = await pool.query<{ id: string }>("SELECT id FROM companies WHERE org_id = $1 AND name = $2 LIMIT 1", [orgId, cname]);
+    if (r.rows[0]) existingCompanyIds.push(r.rows[0].id);
+  }
+  // 0-5 = original companies, 6-11 = the new ones above.
+  const companyIds = [...existingCompanyIds, ...newCompanyIds];
+
+  const newContactsSeed: Array<{
+    name: string;
+    email: string;
+    phone: string;
+    company: number;
+    interest: string;
+    budgetTier: string;
+    targetSegment: string;
+    source: string;
+    temperature: "hot" | "warm" | "cold";
+  }> = [
+    { name: "Layla Haddad", email: "layla@coralreefresorts.ae", phone: "+971 50 234 1122", company: 6, interest: "Guest loyalty program", budgetTier: "high", targetSegment: "Hospitality", source: "manual", temperature: "hot" },
+    { name: "Karim El Sayed", email: "karim@desertroselogistics.ae", phone: "+971 55 345 2233", company: 7, interest: "Fleet tracking software", budgetTier: "medium", targetSegment: "Logistics", source: "import", temperature: "warm" },
+    { name: "Priya Nair", email: "priya@brightpatheducation.ae", phone: "+971 52 456 3344", company: 8, interest: "LMS deployment", budgetTier: "low", targetSegment: "Education", source: "qr", temperature: "cold" },
+    { name: "Daniel Kessler", email: "daniel@lumenhealthclinics.ae", phone: "+971 50 567 4455", company: 9, interest: "Patient CRM rollout", budgetTier: "high", targetSegment: "Healthcare", source: "manual", temperature: "hot" },
+    { name: "Fatima Al Zaabi", email: "fatima@zenithrealestate.ae", phone: "+971 55 678 5566", company: 10, interest: "Property portal", budgetTier: "high", targetSegment: "Real Estate", source: "whatsapp-qr", temperature: "warm" },
+    { name: "Robert Hayes", email: "robert@orionfintech.ae", phone: "+971 52 789 6677", company: 11, interest: "Compliance automation", budgetTier: "high", targetSegment: "FinTech", source: "import", temperature: "hot" },
+    { name: "Noora Al Suwaidi", email: "noora@azurebayhotels.ae", phone: "+971 50 890 7788", company: 0, interest: "Concierge chatbot", budgetTier: "low", targetSegment: "Hospitality", source: "qr", temperature: "cold" },
+    { name: "Marco Bellini", email: "marco@meridianprecision.ae", phone: "+971 55 901 8899", company: 1, interest: "Predictive maintenance", budgetTier: "medium", targetSegment: "Manufacturing", source: "manual", temperature: "warm" },
+    { name: "Aisha Rahman", email: "aisha@alwahatrading.ae", phone: "+971 52 012 9900", company: 2, interest: "E-commerce platform", budgetTier: "high", targetSegment: "Retail", source: "import", temperature: "hot" },
+    { name: "Thomas Becker", email: "thomas@greenpack.ae", phone: "+971 50 123 0011", company: 3, interest: "Recycling tracker", budgetTier: "low", targetSegment: "Manufacturing", source: "qr", temperature: "cold" },
+    { name: "Hana Suzuki", email: "hana@dsventures.ae", phone: "+971 55 234 1123", company: 4, interest: "Series A follow-on", budgetTier: "medium", targetSegment: "Venture / Tech", source: "manual", temperature: "warm" },
+    { name: "Khalid Bin Ali", email: "khalid@falconindustrial.ae", phone: "+971 52 345 2234", company: 5, interest: "IoT sensors rollout", budgetTier: "high", targetSegment: "Industrial", source: "whatsapp-qr", temperature: "hot" },
+    { name: "Elena Petrova", email: "elena@coralreefresorts.ae", phone: "+971 50 456 3345", company: 6, interest: "Spa booking system", budgetTier: "low", targetSegment: "Hospitality", source: "import", temperature: "cold" },
+    { name: "Omar Chaudhry", email: "omar@desertroselogistics.ae", phone: "+971 55 567 4456", company: 7, interest: "Warehouse automation", budgetTier: "high", targetSegment: "Logistics", source: "manual", temperature: "hot" },
+    { name: "Sofia Marino", email: "sofia@brightpatheducation.ae", phone: "+971 52 678 5567", company: 8, interest: "Parent communication app", budgetTier: "medium", targetSegment: "Education", source: "qr", temperature: "warm" },
+    { name: "Rashid Al Falasi", email: "rashid@lumenhealthclinics.ae", phone: "+971 50 789 6678", company: 9, interest: "Telehealth pilot", budgetTier: "low", targetSegment: "Healthcare", source: "import", temperature: "cold" },
+    { name: "Grace Mensah", email: "grace@zenithrealestate.ae", phone: "+971 55 890 7789", company: 10, interest: "Virtual tour integration", budgetTier: "high", targetSegment: "Real Estate", source: "manual", temperature: "hot" },
+    { name: "Vikram Malhotra", email: "vikram@orionfintech.ae", phone: "+971 52 901 8890", company: 11, interest: "Fraud detection module", budgetTier: "medium", targetSegment: "FinTech", source: "whatsapp-qr", temperature: "warm" },
+    { name: "Nadia Kanaan", email: "nadia@azurebayhotels.ae", phone: "+971 50 012 9901", company: 0, interest: "Group booking portal", budgetTier: "high", targetSegment: "Hospitality", source: "import", temperature: "hot" },
+    { name: "Chen Wei", email: "chen@meridianprecision.ae", phone: "+971 55 123 0012", company: 1, interest: "Supplier portal", budgetTier: "low", targetSegment: "Manufacturing", source: "qr", temperature: "cold" },
+  ];
+
+  const newContactIds: string[] = [];
+  for (const c of newContactsSeed) {
+    const ctid = id();
+    await pool.query(
+      `INSERT INTO contacts (id, org_id, company_id, name, email, phone, tags, interest, budget_tier, target_segment, source, owner_id, created_at, temperature)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [ctid, orgId, companyIds[c.company], c.name, c.email, c.phone, "[]", c.interest, c.budgetTier, c.targetSegment, c.source, userId, now(), c.temperature]
+    );
+    newContactIds.push(ctid);
+  }
+
+  const newDealsSeed = [
+    { title: "Guest loyalty program integration", contact: 0, company: 6, value: 45000, stage: "qualified", prob: 40, lastInteraction: 4 },
+    { title: "Fleet tracking software", contact: 1, company: 7, value: 120000, stage: "negotiation", prob: 65, lastInteraction: 8 },
+    { title: "LMS deployment", contact: 2, company: 8, value: 60000, stage: "lead", prob: 15, lastInteraction: 12 },
+    { title: "Patient CRM rollout", contact: 3, company: 9, value: 210000, stage: "proposal", prob: 55, lastInteraction: 5 },
+    { title: "Property listing portal", contact: 4, company: 10, value: 88000, stage: "contacted", prob: 25, lastInteraction: 2 },
+    { title: "Compliance automation suite", contact: 5, company: 11, value: 340000, stage: "negotiation", prob: 70, lastInteraction: 10 },
+    { title: "Concierge chatbot pilot", contact: 6, company: 0, value: 25000, stage: "closed_lost", prob: 0, lastInteraction: 60 },
+    { title: "Predictive maintenance platform", contact: 7, company: 1, value: 175000, stage: "qualified", prob: 45, lastInteraction: 7 },
+    { title: "E-commerce platform build", contact: 8, company: 2, value: 260000, stage: "proposal", prob: 50, lastInteraction: 15 },
+    { title: "Recycling tracker rollout", contact: 9, company: 3, value: 40000, stage: "closed_lost", prob: 0, lastInteraction: 90 },
+    { title: "Series A follow-on round", contact: 10, company: 4, value: 500000, stage: "lead", prob: 10, lastInteraction: 3 },
+    { title: "IoT sensors rollout - phase 1", contact: 11, company: 5, value: 145000, stage: "closed_won", prob: 100, lastInteraction: 20 },
+  ];
+  const newDealIds: string[] = [];
+  for (const d of newDealsSeed) {
+    const did = id();
+    await pool.query(
+      `INSERT INTO deals (id, org_id, contact_id, company_id, title, value, stage, probability, owner_id, expected_close_date, last_interaction_at, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [did, orgId, newContactIds[d.contact], companyIds[d.company], d.title, d.value, d.stage, d.prob, userId, daysAgo(-20), daysAgo(d.lastInteraction), daysAgo(d.lastInteraction + 10)]
+    );
+    newDealIds.push(did);
+  }
+
+  const activityTypes: Array<[string, string]> = [
+    ["email", "Email sent: commercial proposal recap"],
+    ["call", "Alignment call (15 min)"],
+    ["whatsapp", "WhatsApp message: document receipt confirmed"],
+    ["meeting", "Meeting at the client's office"],
+    ["note", "Internal note: watch Q3 budget under review"],
+  ];
+  for (let i = 0; i < newDealIds.length; i++) {
+    const dealId = newDealIds[i];
+    const contactId = newContactIds[newDealsSeed[i].contact];
+    for (let k = 0; k < 3; k++) {
+      const [type, content] = activityTypes[(i + k) % activityTypes.length];
+      await pool.query(
+        "INSERT INTO activities (id, org_id, contact_id, deal_id, type, content, occurred_at, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        [id(), orgId, contactId, dealId, type, content, daysAgo(newDealsSeed[i].lastInteraction + k * 4), now()]
+      );
+    }
+  }
+
+  const newTasksSeed = [
+    { title: "Send loyalty program proposal to Layla Haddad", due: -1, deal: 0, contact: 0, priority: "high" },
+    { title: "Confirm fleet tracking pilot scope with Karim El Sayed", due: 0, deal: 1, contact: 1, priority: "high" },
+    { title: "Share LMS demo recording with Priya Nair", due: 2, deal: 2, contact: 2, priority: "low" },
+    { title: "Follow up on patient CRM contract redlines", due: 1, deal: 3, contact: 3, priority: "medium" },
+    { title: "Schedule property portal walkthrough", due: 0, deal: 4, contact: 4, priority: "medium" },
+    { title: "Prepare compliance automation ROI deck", due: -2, deal: 5, contact: 5, priority: "high" },
+    { title: "Send IoT rollout completion report", due: 3, deal: 11, contact: 11, priority: "low" },
+  ];
+  for (const t of newTasksSeed) {
+    await pool.query(
+      "INSERT INTO tasks (id, org_id, contact_id, deal_id, title, due_date, done, priority, owner_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+      [id(), orgId, newContactIds[t.contact], newDealIds[t.deal], t.title, daysAgo(-t.due), 0, t.priority, userId, now()]
+    );
+  }
+
+  const meetingsSeed = [
+    {
+      contact: 3,
+      deal: 3,
+      title: "Patient CRM rollout - discovery call",
+      date: daysAgo(6),
+      summary: {
+        participants: ["Federica Camurri", "Daniel Kessler"],
+        keyPoints: [
+          "Walked through the current patient intake workflow",
+          "Identified 2 clinics as pilot sites",
+          "Discussed data-handling requirements for the UAE healthcare market",
+        ],
+        decisions: ["Move forward with a 2-clinic pilot before full rollout"],
+        objections: ["Concerned about staff training time during go-live"],
+        nextSteps: [
+          { action: "Send pilot scope document", owner: "Federica Camurri", dueDate: daysAgo(-4) },
+          { action: "Confirm pilot clinic IT contacts", owner: "Daniel Kessler", dueDate: daysAgo(-6) },
+        ],
+      },
+    },
+    {
+      contact: 5,
+      deal: 5,
+      title: "Compliance automation - contract review",
+      date: daysAgo(9),
+      summary: {
+        participants: ["Federica Camurri", "Robert Hayes"],
+        keyPoints: [
+          "Reviewed integration points with the existing risk engine",
+          "Confirmed data residency requirements",
+          "Discussed a phased rollout across 3 regional offices",
+        ],
+        decisions: ["Legal to review the data processing agreement before signature"],
+        objections: ["Pricing tier for the highest transaction volume needs revisiting"],
+        nextSteps: [
+          { action: "Send revised pricing proposal", owner: "Federica Camurri", dueDate: daysAgo(-2) },
+          { action: "Loop in legal team", owner: "Robert Hayes", dueDate: daysAgo(-5) },
+        ],
+      },
+    },
+  ];
+  for (const m of meetingsSeed) {
+    await pool.query(
+      "INSERT INTO meetings (id, org_id, contact_id, deal_id, title, date, transcript, summary_json, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [id(), orgId, newContactIds[m.contact], newDealIds[m.deal], m.title, m.date, null, JSON.stringify(m.summary), now()]
+    );
+  }
+
+  await pool.query(
+    `INSERT INTO campaigns (id, org_id, title, message, channel, segment_interest, segment_budget_tier, segment_target_segment, status, recipient_count, created_at, sent_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [
+      id(),
+      orgId,
+      "Fintech compliance webinar",
+      "You're invited: a 30-minute walkthrough of our compliance automation suite, tailored for UAE fintech firms.",
+      "email",
+      null,
+      "high",
+      "FinTech",
+      "sent",
+      3,
+      daysAgo(6),
+      daysAgo(6),
+    ]
+  );
+  await pool.query(
+    `INSERT INTO campaigns (id, org_id, title, message, channel, segment_interest, segment_budget_tier, segment_target_segment, status, recipient_count, created_at, sent_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [id(), orgId, "Healthcare pilot follow-up", "Checking in on the patient CRM pilot - happy to jump on a call this week if useful.", "whatsapp", null, null, "Healthcare", "draft", 0, now(), null]
+  );
+
+  await pool.query("INSERT INTO custom_alerts (id, org_id, title, remind_at, done, created_at, kind, contact_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [
+    id(),
+    orgId,
+    "Call Robert Hayes about revised pricing",
+    daysAgo(-1),
+    0,
+    now(),
+    "call",
+    newContactIds[5],
+  ]);
+  await pool.query("INSERT INTO custom_alerts (id, org_id, title, remind_at, done, created_at, kind, contact_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [
+    id(),
+    orgId,
+    "On-site walkthrough with Fatima Al Zaabi",
+    daysAgo(-3),
+    0,
+    now(),
+    "appointment",
+    newContactIds[4],
+  ]);
+
+  // Marker row last, with the fixed id checked at the top of this function.
+  await pool.query("INSERT INTO custom_alerts (id, org_id, title, remind_at, done, created_at, kind, contact_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [
+    DEMO_ENRICHMENT_MARKER_ID,
+    orgId,
+    "[internal] demo data enrichment v1 applied",
+    daysAgo(1),
+    1,
+    now(),
+    "general",
+    null,
+  ]);
+
+  // eslint-disable-next-line no-console
+  console.log("[ahead-pearl] Demo data enriched: +6 companies, +20 contacts, +12 deals, +2 meetings, +2 campaigns.");
 }

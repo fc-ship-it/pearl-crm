@@ -15,7 +15,7 @@ DATABASE_URL="postgresql://<user>:<password>@<host>/<db>?sslmode=require" npm ru
 
 Open `http://localhost:3000`. On first run the database creates its schema and seeds itself with realistic demo data (UAE contacts, pipeline, tasks, one already-generated meeting) — nothing else to set up.
 
-**Demo login:** `demo@pearlcrm.ae` / `demo1234` ("Use demo credentials" button is already on the page).
+**Demo login:** `demo@pearlcrm.ae`, password rotated away from the old public default — see `NEW_DEMO_PASSWORD` in `src/lib/db.ts` (kept out of this file on purpose since this repo may not stay private forever; the login page no longer has an autofill button for it).
 
 ## What's real and what's mocked
 
