@@ -1,9 +1,10 @@
 import { getSession } from "@/lib/auth";
-import { dashboardStats, listTasks, listMeetings, listDeals, listContacts, type Deal } from "@/lib/data";
+import { dashboardStats, listTasks, listMeetings, listDeals, listContacts, hasAnsweredFeatureInterest, type Deal } from "@/lib/data";
 import { formatCurrency, urgencyLevel, relativeDaysLabel, URGENCY_COLORS, stageConfig } from "@/lib/domain";
 import Link from "next/link";
 import TaskChecklist from "@/components/TaskChecklist";
 import LeadTemperatureWidget from "@/components/LeadTemperatureWidget";
+import InterestBanner from "@/components/InterestBanner";
 import { TrendingUp, AlertTriangle, Trophy, Percent, BellRing } from "lucide-react";
 
 export default async function DashboardPage() {
@@ -13,6 +14,7 @@ export default async function DashboardPage() {
   const tasks = (await listTasks(orgId, { onlyOpen: true })).slice(0, 6);
   const meetings = (await listMeetings(orgId)).slice(0, 3);
   const contacts = await listContacts(orgId);
+  const showInterestBanner = !(await hasAnsweredFeatureInterest(session!.userId));
 
   return (
     <div className="space-y-6 max-w-[1400px]">
@@ -24,6 +26,8 @@ export default async function DashboardPage() {
           Here's what deserves your attention today.
         </p>
       </div>
+
+      {showInterestBanner && <InterestBanner />}
 
       {stats.dueCustomAlerts.length > 0 && (
         <div className="card p-4" style={{ border: "1px solid var(--warning)", background: "rgba(224,151,46,0.06)" }}>

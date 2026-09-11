@@ -51,6 +51,15 @@ export type ContactFilters = {
   interest?: string;
   budgetTier?: string;
   targetSegment?: string;
+  /**
+   * True → only contacts with no company, interest, budget tier, or target
+   * segment set. That combination is what a raw phone-book import via the
+   * Contact Picker looks like (it only ever carries name/email/phone), so
+   * this is what lets someone reliably select "everything I imported from
+   * my phone" without also catching demo/manually-entered contacts, which
+   * always have at least one of those fields filled in.
+   */
+  rawImportsOnly?: boolean;
 };
 
 export type Campaign = {
@@ -231,6 +240,25 @@ export async function deleteContact(orgId: string, contactId: string): Promise<v
   await db.prepare("DELETE FROM contacts WHERE org_id = ? AND id = ?").run(orgId, contactId);
 }
 
+/**
+ * Bulk version of deleteContact — used by the "select many, delete" action
+ * in the contacts list, e.g. wiping out a batch of thousands of contacts
+ * imported by mistake (a phone's whole address book via the Contact
+ * Picker). Same detach-then-delete order as the single-contact version,
+ * just one statement per table instead of one per contact per table, which
+ * matters once contactIds is in the thousands rather than a handful.
+ */
+export async function deleteContacts(orgId: string, contactIds: string[]): Promise<number> {
+  if (contactIds.length === 0) return 0;
+  await db.prepare("DELETE FROM activities WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
+  await db.prepare("DELETE FROM tasks WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
+  await db.prepare("DELETE FROM meetings WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
+  await db.prepare("DELETE FROM custom_alerts WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
+  await db.prepare("UPDATE deals SET contact_id = NULL WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
+  const result = await db.prepare("DELETE FROM contacts WHERE org_id = ? AND id = ANY(?::text[])").run(orgId, contactIds);
+  return result.changes;
+}
+
 export async function listContacts(orgId: string, filters: ContactFilters = {}): Promise<Contact[]> {
   const clauses = ["ct.org_id = ?"];
   const params: any[] = [orgId];
@@ -245,6 +273,9 @@ export async function listContacts(orgId: string, filters: ContactFilters = {}):
   if (filters.targetSegment) {
     clauses.push("ct.target_segment = ?");
     params.push(filters.targetSegment);
+  }
+  if (filters.rawImportsOnly) {
+    clauses.push("ct.company_id IS NULL AND ct.interest IS NULL AND ct.budget_tier IS NULL AND ct.target_segment IS NULL");
   }
   const rows = await db
     .prepare(
@@ -553,10 +584,279 @@ export type Organization = {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_cancel_at_period_end: number;
+  match_opt_in: number;
+  match_headline: string | null;
+  match_sector: string | null;
+  match_offering: string | null;
+  match_looking_for: string | null;
+  match_contact_email: string | null;
+  match_contact_phone: string | null;
+  match_updated_at: string | null;
+  match_featured_active: number;
+  match_featured_stripe_subscription_id: string | null;
+  match_featured_period_end: string | null;
+  match_featured_cancel_at_period_end: number;
 };
 
 export async function getOrganization(orgId: string): Promise<Organization | undefined> {
   return (await db.prepare("SELECT * FROM organizations WHERE id = ?").get(orgId)) as Organization | undefined;
+}
+
+export type MatchProfileInput = {
+  optIn: boolean;
+  headline: string;
+  sector: string;
+  offering: string;
+  lookingFor: string;
+  contactEmail: string;
+  contactPhone: string;
+};
+
+export type MatchProfile = {
+  orgId: string;
+  orgName: string;
+  headline: string | null;
+  sector: string | null;
+  offering: string | null;
+  lookingFor: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  updatedAt: string | null;
+  featured: boolean;
+  /** "org" = a real Pearl customer's self-declared card; "sponsor" = an
+   * external listing AHEAD LLC sold and manages from the Owner Dashboard
+   * (monetization point #4) — kept distinct so the UI can label it. */
+  kind: "org" | "sponsor";
+};
+
+/**
+ * Saves an org's own "Business Match" card — see the migration note in
+ * db.ts for why this is a deliberately separate, self-declared profile
+ * rather than anything derived from the org's CRM contacts. Turning
+ * optIn off immediately drops the org out of listMatchProfiles for
+ * everyone else, without deleting the filled-in fields (so re-enabling
+ * later doesn't mean retyping everything).
+ */
+export async function updateMatchProfile(orgId: string, input: MatchProfileInput): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE organizations
+       SET match_opt_in = ?, match_headline = ?, match_sector = ?, match_offering = ?,
+           match_looking_for = ?, match_contact_email = ?, match_contact_phone = ?, match_updated_at = ?
+       WHERE id = ?`
+    )
+    .run(
+      input.optIn ? 1 : 0,
+      input.headline.trim() || null,
+      input.sector.trim() || null,
+      input.offering.trim() || null,
+      input.lookingFor.trim() || null,
+      input.contactEmail.trim() || null,
+      input.contactPhone.trim() || null,
+      new Date().toISOString(),
+      orgId
+    );
+}
+
+/** The other side of the directory: every opted-in org except the caller's
+ * own, plus every active sponsor listing, optionally narrowed by a
+ * free-text search across sector/headline/offering/looking-for. Never
+ * touches contacts/deals — only the self-declared match_* columns and the
+ * separate sponsor table, which is the whole privacy point. Featured orgs
+ * (monetization point #1) sort first. */
+export async function listMatchProfiles(excludeOrgId: string, search?: string): Promise<MatchProfile[]> {
+  const clauses = ["match_opt_in = 1", "id != ?"];
+  const params: any[] = [excludeOrgId];
+  if (search) {
+    clauses.push("(match_headline ILIKE ? OR match_sector ILIKE ? OR match_offering ILIKE ? OR match_looking_for ILIKE ?)");
+    const like = `%${search}%`;
+    params.push(like, like, like, like);
+  }
+  const orgRows = await db
+    .prepare(
+      `SELECT id, name, match_headline, match_sector, match_offering, match_looking_for,
+              match_contact_email, match_contact_phone, match_updated_at, match_featured_active
+       FROM organizations
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY match_featured_active DESC, match_updated_at DESC`
+    )
+    .all(...params);
+
+  const sponsorClauses = ["active = 1"];
+  const sponsorParams: any[] = [];
+  if (search) {
+    sponsorClauses.push("(headline ILIKE ? OR sector ILIKE ? OR offering ILIKE ? OR looking_for ILIKE ?)");
+    const like = `%${search}%`;
+    sponsorParams.push(like, like, like, like);
+  }
+  const sponsorRows = await db
+    .prepare(
+      `SELECT id, name, headline, sector, offering, looking_for, contact_email, contact_phone, created_at
+       FROM match_sponsors
+       WHERE ${sponsorClauses.join(" AND ")}
+       ORDER BY created_at DESC`
+    )
+    .all(...sponsorParams);
+
+  const orgs: MatchProfile[] = orgRows.map((r: any) => ({
+    orgId: r.id,
+    orgName: r.name,
+    headline: r.match_headline,
+    sector: r.match_sector,
+    offering: r.match_offering,
+    lookingFor: r.match_looking_for,
+    contactEmail: r.match_contact_email,
+    contactPhone: r.match_contact_phone,
+    updatedAt: r.match_updated_at,
+    featured: !!r.match_featured_active,
+    kind: "org",
+  }));
+  const sponsors: MatchProfile[] = sponsorRows.map((r: any) => ({
+    orgId: r.id,
+    orgName: r.name,
+    headline: r.headline,
+    sector: r.sector,
+    offering: r.offering,
+    lookingFor: r.looking_for,
+    contactEmail: r.contact_email,
+    contactPhone: r.contact_phone,
+    updatedAt: r.created_at,
+    featured: true, // sponsors are a paid placement — always shown first, like featured orgs
+    kind: "sponsor",
+  }));
+
+  // Sponsors and featured orgs both lead the list; sponsors first since
+  // they're a direct AHEAD LLC commercial placement.
+  return [...sponsors, ...orgs];
+}
+
+/** Turns on/off (or renews) the paid "in evidenza" placement for one org —
+ * see the migration note in db.ts for why this never touches the org's
+ * main plan/subscription_status. Called from both the Stripe Checkout
+ * success redirect and the webhook (same "whichever lands first wins"
+ * pattern as applyStripeSubscription). */
+export async function applyFeaturedSubscription(
+  orgId: string,
+  sub: { subscriptionId: string; status: SubscriptionStatus; periodEndIso: string | null; cancelAtPeriodEnd: boolean }
+): Promise<void> {
+  const active = sub.status === "active" || sub.status === "trialing" || sub.status === "past_due";
+  await db
+    .prepare(
+      `UPDATE organizations SET
+       match_featured_active = ?,
+       match_featured_stripe_subscription_id = ?,
+       match_featured_period_end = COALESCE(?, match_featured_period_end),
+       match_featured_cancel_at_period_end = ?
+     WHERE id = ?`
+    )
+    .run(active ? 1 : 0, sub.subscriptionId, sub.periodEndIso, sub.cancelAtPeriodEnd ? 1 : 0, orgId);
+}
+
+/* ---------------------------------------------------------------------- *
+ * Sponsor listings (monetization point #4) — external, Owner-managed
+ * placements in the Business Match directory. See the match_sponsors
+ * table comment in db.ts.
+ * ---------------------------------------------------------------------- */
+
+export type SponsorInput = {
+  name: string;
+  headline: string;
+  sector: string;
+  offering: string;
+  lookingFor: string;
+  contactEmail: string;
+  contactPhone: string;
+};
+
+export type Sponsor = SponsorInput & { id: string; active: boolean; createdAt: string };
+
+export async function listAllSponsors(): Promise<Sponsor[]> {
+  const rows = await db.prepare(`SELECT * FROM match_sponsors ORDER BY created_at DESC`).all();
+  return rows.map((r: any) => ({
+    id: r.id,
+    name: r.name,
+    headline: r.headline ?? "",
+    sector: r.sector ?? "",
+    offering: r.offering ?? "",
+    lookingFor: r.looking_for ?? "",
+    contactEmail: r.contact_email ?? "",
+    contactPhone: r.contact_phone ?? "",
+    active: !!r.active,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function createSponsor(input: SponsorInput): Promise<string> {
+  const id = newId();
+  await db
+    .prepare(
+      `INSERT INTO match_sponsors (id, name, headline, sector, offering, looking_for, contact_email, contact_phone, active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+    )
+    .run(
+      id,
+      input.name.trim(),
+      input.headline.trim() || null,
+      input.sector.trim() || null,
+      input.offering.trim() || null,
+      input.lookingFor.trim() || null,
+      input.contactEmail.trim() || null,
+      input.contactPhone.trim() || null,
+      new Date().toISOString()
+    );
+  return id;
+}
+
+export async function setSponsorActive(id: string, active: boolean): Promise<void> {
+  await db.prepare(`UPDATE match_sponsors SET active = ? WHERE id = ?`).run(active ? 1 : 0, id);
+}
+
+export async function deleteSponsor(id: string): Promise<void> {
+  await db.prepare(`DELETE FROM match_sponsors WHERE id = ?`).run(id);
+}
+
+/* ---------------------------------------------------------------------- *
+ * Feature-interest survey — the one-click "would you want a Real Estate
+ * CRM module?" banner. Recorded per user so the Owner Dashboard can see
+ * both raw sentiment and which companies said yes.
+ * ---------------------------------------------------------------------- */
+
+const REAL_ESTATE_CRM_FEATURE = "real_estate_crm";
+
+export async function hasAnsweredFeatureInterest(userId: string, feature = REAL_ESTATE_CRM_FEATURE): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 FROM feature_interest_responses WHERE feature = ? AND user_id = ?`)
+    .get(feature, userId);
+  return !!row;
+}
+
+export async function recordFeatureInterest(
+  params: { orgId: string; userId: string; answer: "yes" | "maybe" | "no" },
+  feature = REAL_ESTATE_CRM_FEATURE
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO feature_interest_responses (id, feature, org_id, user_id, answer, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (feature, user_id) DO UPDATE SET answer = EXCLUDED.answer, created_at = EXCLUDED.created_at`
+    )
+    .run(newId(), feature, params.orgId, params.userId, params.answer, new Date().toISOString());
+}
+
+export type FeatureInterestRow = { orgName: string; userName: string; answer: string; createdAt: string };
+
+export async function listFeatureInterest(feature = REAL_ESTATE_CRM_FEATURE): Promise<FeatureInterestRow[]> {
+  const rows = await db
+    .prepare(
+      `SELECT o.name as org_name, u.name as user_name, r.answer, r.created_at
+       FROM feature_interest_responses r
+       JOIN organizations o ON o.id = r.org_id
+       JOIN users u ON u.id = r.user_id
+       WHERE r.feature = ?
+       ORDER BY r.created_at DESC`
+    )
+    .all(feature);
+  return rows.map((r: any) => ({ orgName: r.org_name, userName: r.user_name, answer: r.answer, createdAt: r.created_at }));
 }
 
 /** Who a billing email for this org should go to — the earliest-created

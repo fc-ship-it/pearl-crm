@@ -1,7 +1,8 @@
 import Image from "next/image";
-import { listAllOrganizations, listAllUsers, platformStats } from "@/lib/data";
+import { listAllOrganizations, listAllUsers, platformStats, listAllSponsors, listFeatureInterest } from "@/lib/data";
 import OrgActions from "./OrgActions";
 import LogoutButton from "./LogoutButton";
+import SponsorsPanel from "./SponsorsPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,10 @@ export default async function OwnerDashboardPage() {
   const stats = await platformStats();
   const orgs = await listAllOrganizations();
   const users = await listAllUsers();
+  const sponsors = await listAllSponsors();
+  const interest = await listFeatureInterest();
+  const interestCounts = { yes: 0, maybe: 0, no: 0 } as Record<string, number>;
+  for (const r of interest) interestCounts[r.answer] = (interestCounts[r.answer] ?? 0) + 1;
   const now = Date.now();
 
   return (
@@ -160,6 +165,81 @@ export default async function OwnerDashboardPage() {
                       <td className="px-4 py-3 capitalize">{u.role.toLowerCase()}</td>
                       <td className="px-4 py-3" style={{ color: "var(--ink-dim)" }}>
                         {fmtDate(u.createdAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h2 className="font-display text-base mb-3" style={{ color: "var(--ink)" }}>
+            Sponsor Business Match ({sponsors.length})
+          </h2>
+          <SponsorsPanel sponsors={sponsors} />
+        </section>
+
+        <section>
+          <h2 className="font-display text-base mb-1" style={{ color: "var(--ink)" }}>
+            Interesse per un CRM Real Estate
+          </h2>
+          <p className="text-sm mb-4" style={{ color: "var(--ink-dim)" }}>
+            Risposte alla domanda mostrata in dashboard: "Ti interesserebbe una versione di Pearl per il real estate,
+            con PDF/video dei progetti e invio via mailing list?"
+          </p>
+          <div className="grid grid-cols-3 gap-3 mb-4 max-w-[500px]">
+            <div className="card p-4 text-center">
+              <div className="text-2xl font-display" style={{ color: "var(--success)" }}>
+                {interestCounts.yes ?? 0}
+              </div>
+              <div className="text-xs mt-1" style={{ color: "var(--ink-dim)" }}>
+                Sì
+              </div>
+            </div>
+            <div className="card p-4 text-center">
+              <div className="text-2xl font-display" style={{ color: "var(--warning)" }}>
+                {interestCounts.maybe ?? 0}
+              </div>
+              <div className="text-xs mt-1" style={{ color: "var(--ink-dim)" }}>
+                Forse
+              </div>
+            </div>
+            <div className="card p-4 text-center">
+              <div className="text-2xl font-display" style={{ color: "var(--ink-dim)" }}>
+                {interestCounts.no ?? 0}
+              </div>
+              <div className="text-xs mt-1" style={{ color: "var(--ink-dim)" }}>
+                No
+              </div>
+            </div>
+          </div>
+          {interest.length === 0 ? (
+            <p className="text-sm card p-6" style={{ color: "var(--ink-dim)" }}>
+              Ancora nessuna risposta.
+            </p>
+          ) : (
+            <div className="card overflow-x-auto">
+              <table className="w-full text-sm" style={{ color: "var(--ink)" }}>
+                <thead>
+                  <tr className="text-left text-xs" style={{ color: "var(--ink-dim)", borderBottom: "1px solid var(--border)" }}>
+                    <th className="px-4 py-3 font-medium">Azienda</th>
+                    <th className="px-4 py-3 font-medium">Persona</th>
+                    <th className="px-4 py-3 font-medium">Risposta</th>
+                    <th className="px-4 py-3 font-medium">Quando</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {interest.map((r, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td className="px-4 py-3 font-medium">{r.orgName}</td>
+                      <td className="px-4 py-3" style={{ color: "var(--ink-dim)" }}>
+                        {r.userName}
+                      </td>
+                      <td className="px-4 py-3 capitalize">{r.answer === "yes" ? "Sì" : r.answer === "maybe" ? "Forse" : "No"}</td>
+                      <td className="px-4 py-3" style={{ color: "var(--ink-dim)" }}>
+                        {fmtDate(r.createdAt)}
                       </td>
                     </tr>
                   ))}

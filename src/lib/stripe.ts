@@ -111,6 +111,53 @@ export async function createSubscriptionCheckout(params: {
   return { url: session.url };
 }
 
+/** Price for the paid "in evidenza" (featured) placement in the Business
+ * Match directory — a small recurring add-on, entirely separate from the
+ * org's main Pearl subscription (see the migration note in db.ts). Kept as
+ * a constant here, same "single source of truth" pattern as BILLING_PLANS. */
+export const MATCH_FEATURED_PRICE_AED = 49;
+export const MATCH_FEATURED_INTERVAL: Stripe.PriceCreateParams.Recurring.Interval = "month";
+
+/**
+ * Starts a Stripe Checkout session for the "in evidenza" add-on. Reuses the
+ * org's existing Stripe customer (if it has one from its main subscription)
+ * so both subscriptions show up together in the same customer portal —
+ * otherwise falls back to customer_email, same as createSubscriptionCheckout.
+ * Tagged with `purpose: "match_featured"` in metadata so the confirm/webhook
+ * routes route this to applyFeaturedSubscription instead of
+ * applyStripeSubscription, keeping it fully isolated from core billing.
+ */
+export async function createFeaturedListingCheckout(params: {
+  orgId: string;
+  customerId?: string | null;
+  customerEmail?: string;
+  successUrl: string;
+  cancelUrl: string;
+}): Promise<{ url: string }> {
+  const session = await stripe().checkout.sessions.create({
+    mode: "subscription",
+    ...(params.customerId ? { customer: params.customerId } : { customer_email: params.customerEmail }),
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: "aed",
+          unit_amount: aedToFils(MATCH_FEATURED_PRICE_AED),
+          recurring: { interval: MATCH_FEATURED_INTERVAL },
+          product_data: { name: "Pearl Business Match — In evidenza" },
+        },
+      },
+    ],
+    subscription_data: { metadata: { orgId: params.orgId, purpose: "match_featured" } },
+    metadata: { orgId: params.orgId, purpose: "match_featured" },
+    success_url: params.successUrl,
+    cancel_url: params.cancelUrl,
+  });
+
+  if (!session.url) throw new Error("Stripe did not return a Checkout URL");
+  return { url: session.url };
+}
+
 export type NormalizedSubscription = {
   customerId: string;
   subscriptionId: string;

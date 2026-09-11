@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { applyStripeSubscription, getOrganization, getOrgBillingContactEmail } from "@/lib/data";
+import { applyStripeSubscription, applyFeaturedSubscription, getOrganization, getOrgBillingContactEmail } from "@/lib/data";
 import { constructWebhookEvent, getSubscription, normalizeSubscription, StripeNotConfiguredError } from "@/lib/stripe";
 import { sendWelcomeEmail, sendPaymentFailedEmail } from "@/lib/notify";
 
@@ -36,7 +36,13 @@ export async function POST(req: NextRequest) {
         const session = event.data.object as Stripe.Checkout.Session;
         const orgId = session.client_reference_id || (session.metadata?.orgId as string | undefined);
         const subscriptionId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
+        const isFeatured = session.metadata?.purpose === "match_featured";
         if (orgId && subscriptionId) {
+          if (isFeatured) {
+            const sub = await getSubscription(subscriptionId);
+            await applyFeaturedSubscription(orgId, normalizeSubscription(sub));
+            break;
+          }
           const existingOrg = await getOrganization(orgId);
           const wasIncomplete = existingOrg?.subscription_status === "incomplete";
           const sub = await getSubscription(subscriptionId);
@@ -56,7 +62,13 @@ export async function POST(req: NextRequest) {
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
         const orgId = sub.metadata?.orgId;
-        if (orgId) await applyStripeSubscription(orgId, normalizeSubscription(sub));
+        if (orgId) {
+          if (sub.metadata?.purpose === "match_featured") {
+            await applyFeaturedSubscription(orgId, normalizeSubscription(sub));
+          } else {
+            await applyStripeSubscription(orgId, normalizeSubscription(sub));
+          }
+        }
         break;
       }
       case "invoice.payment_failed": {
@@ -71,10 +83,19 @@ export async function POST(req: NextRequest) {
           const sub = await getSubscription(subId);
           const orgId = sub.metadata?.orgId;
           if (orgId) {
-            await applyStripeSubscription(orgId, normalizeSubscription(sub));
-            const org = await getOrganization(orgId);
-            const email = await getOrgBillingContactEmail(orgId);
-            if (org && email) await sendPaymentFailedEmail({ contactEmail: email, orgName: org.name });
+            // A failed featured-listing invoice just quietly drops the
+            // "in evidenza" badge (handled by applyFeaturedSubscription's
+            // status check) — it must never touch the org's core plan/
+            // subscription_status, so no payment-failed email either (that
+            // email is specifically about losing access to Pearl itself).
+            if (sub.metadata?.purpose === "match_featured") {
+              await applyFeaturedSubscription(orgId, normalizeSubscription(sub));
+            } else {
+              await applyStripeSubscription(orgId, normalizeSubscription(sub));
+              const org = await getOrganization(orgId);
+              const email = await getOrgBillingContactEmail(orgId);
+              if (org && email) await sendPaymentFailedEmail({ contactEmail: email, orgName: org.name });
+            }
           }
         }
         break;

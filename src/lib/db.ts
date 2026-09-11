@@ -250,6 +250,41 @@ CREATE TABLE IF NOT EXISTS integrations (
   extra TEXT,
   UNIQUE(org_id, provider)
 );
+
+-- External "sponsor" listings shown in the Business Match directory
+-- (monetization point #4) -- managed only from the Owner Dashboard, since
+-- these are commercial deals AHEAD LLC negotiates directly and may not even
+-- be Pearl customers (e.g. a FIMIMPRESE event sponsor). Kept in its own
+-- table rather than piggybacking on organizations because a sponsor has
+-- no login, no plan, no users -- it's purely a directory entry.
+CREATE TABLE IF NOT EXISTS match_sponsors (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  headline TEXT,
+  sector TEXT,
+  offering TEXT,
+  looking_for TEXT,
+  contact_email TEXT,
+  contact_phone TEXT,
+  logo_url TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
+-- One-click product-validation survey ("would a Real Estate CRM module with
+-- project PDF/video attachments + mailing-list sending interest you?"),
+-- shown once per user as a dashboard banner. Recorded per user (not just
+-- per org) so multiple people at the same company can each weigh in, and so
+-- the Owner Dashboard can show both raw counts and which companies said yes.
+CREATE TABLE IF NOT EXISTS feature_interest_responses (
+  id TEXT PRIMARY KEY,
+  feature TEXT NOT NULL,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  answer TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(feature, user_id)
+);
 `;
 
 async function columnsOf(table: string): Promise<string[]> {
@@ -308,6 +343,36 @@ async function initDb(): Promise<void> {
     ["stripe_customer_id", "TEXT"],
     ["stripe_subscription_id", "TEXT"],
     ["stripe_cancel_at_period_end", "INTEGER NOT NULL DEFAULT 0"],
+  ]);
+  // "Business Match" — an opt-in, org-level directory so Pearl's own paying
+  // customers can find each other for B2B opportunities. Deliberately NOT
+  // built on top of CRM contacts/leads (those were given to a sales rep for
+  // a specific purpose and never consented to being used for matchmaking —
+  // reusing them here would be a real GDPR/PDPL problem). Each org instead
+  // fills in its own public "business card" purely for this feature, opt-in
+  // and off by default, visible only to other opted-in orgs.
+  await addMissingColumns("organizations", [
+    ["match_opt_in", "INTEGER NOT NULL DEFAULT 0"],
+    ["match_headline", "TEXT"],
+    ["match_sector", "TEXT"],
+    ["match_offering", "TEXT"],
+    ["match_looking_for", "TEXT"],
+    ["match_contact_email", "TEXT"],
+    ["match_contact_phone", "TEXT"],
+    ["match_updated_at", "TEXT"],
+  ]);
+  // Paid "featured" placement in the Business Match directory (monetization
+  // point #1) — a small separate Stripe *subscription*, deliberately never
+  // touching plan/subscription_status/stripe_subscription_id (the org's
+  // main billing fields): an org can lapse on this add-on without it ever
+  // affecting their core Pearl access, and vice versa. See applyFeaturedSubscription
+  // in data.ts and the `purpose: "match_featured"` branch in the Stripe
+  // confirm/webhook routes for how this stays isolated from main billing.
+  await addMissingColumns("organizations", [
+    ["match_featured_active", "INTEGER NOT NULL DEFAULT 0"],
+    ["match_featured_stripe_subscription_id", "TEXT"],
+    ["match_featured_period_end", "TEXT"],
+    ["match_featured_cancel_at_period_end", "INTEGER NOT NULL DEFAULT 0"],
   ]);
 
   // ---- one-time demo seed ------------------------------------------------

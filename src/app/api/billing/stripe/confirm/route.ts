@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyStripeSubscription } from "@/lib/data";
+import { applyStripeSubscription, applyFeaturedSubscription } from "@/lib/data";
 import { getCheckoutSession, getSubscription, normalizeSubscription, StripeNotConfiguredError } from "@/lib/stripe";
 import { getAppBaseUrl } from "@/lib/google";
 
@@ -32,7 +32,15 @@ export async function GET(req: NextRequest) {
 
     if (orgId && subscriptionId) {
       const sub = await getSubscription(subscriptionId);
-      await applyStripeSubscription(orgId, normalizeSubscription(sub));
+      const normalized = normalizeSubscription(sub);
+      // A featured-listing checkout is tagged `purpose: "match_featured"` in
+      // its own metadata — route it to the isolated apply function so it
+      // never touches the org's core plan/subscription_status fields.
+      if (checkoutSession.metadata?.purpose === "match_featured") {
+        await applyFeaturedSubscription(orgId, normalized);
+      } else {
+        await applyStripeSubscription(orgId, normalized);
+      }
     }
   } catch (err) {
     if (!(err instanceof StripeNotConfiguredError)) {

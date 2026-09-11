@@ -10,6 +10,7 @@ import {
   Users,
   Video,
   Megaphone,
+  Handshake,
   Plug,
   CreditCard,
   LogOut,
@@ -28,6 +29,7 @@ const NAV = [
   { href: "/app/meetings", label: "AI Meetings", icon: Video },
   { href: "/app/campaigns", label: "Campaigns & alerts", icon: Megaphone },
   { href: "/app/statistics", label: "Statistics", icon: BarChart3 },
+  { href: "/app/network", label: "Business Match", icon: Handshake },
   { href: "/app/settings/integrations", label: "Integrations", icon: Plug },
   { href: "/app/settings/billing", label: "Plan & billing", icon: CreditCard },
 ];
