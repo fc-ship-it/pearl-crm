@@ -1372,3 +1372,110 @@ export async function dashboardStats(orgId: string) {
     dueCustomAlerts,
   };
 }
+
+/* ---------------------------------------------------------------------- *
+ * Web Push subscriptions + the notification sweep. See src/lib/push.ts
+ * for the actual sending; this section is just the storage and the
+ * "what needs a push right now" queries used by /api/push/cron.
+ * ---------------------------------------------------------------------- */
+
+export type PushSubscriptionRow = { endpoint: string; p256dh: string; auth: string };
+
+export async function savePushSubscription(
+  orgId: string,
+  userId: string,
+  sub: { endpoint: string; keys: { p256dh: string; auth: string } }
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO push_subscriptions (id, org_id, user_id, endpoint, p256dh, auth, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (endpoint) DO UPDATE SET org_id = EXCLUDED.org_id, user_id = EXCLUDED.user_id,
+         p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth`
+    )
+    .run(newId(), orgId, userId, sub.endpoint, sub.keys.p256dh, sub.keys.auth, new Date().toISOString());
+}
+
+export async function deletePushSubscriptionByEndpoint(endpoint: string): Promise<void> {
+  await db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+}
+
+export async function hasPushSubscription(userId: string): Promise<boolean> {
+  const row = await db.prepare("SELECT 1 FROM push_subscriptions WHERE user_id = ?").get(userId);
+  return !!row;
+}
+
+export async function listPushSubscriptionsForUser(userId: string): Promise<PushSubscriptionRow[]> {
+  const rows = await db
+    .prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?")
+    .all(userId);
+  return rows as PushSubscriptionRow[];
+}
+
+/** Every subscribed device belonging to an ADMIN of one org — used for
+ * account-level pushes (payment failed, trial ending) rather than
+ * per-salesperson ones. */
+export async function listPushSubscriptionsForOrgAdmins(orgId: string): Promise<PushSubscriptionRow[]> {
+  const rows = await db
+    .prepare(
+      `SELECT ps.endpoint, ps.p256dh, ps.auth
+       FROM push_subscriptions ps
+       JOIN users u ON u.id = ps.user_id
+       WHERE ps.org_id = ? AND u.role = 'ADMIN'`
+    )
+    .all(orgId);
+  return rows as PushSubscriptionRow[];
+}
+
+/** All subscribed devices for an org, used as the fallback for a due alert
+ * that isn't tied to any one contact/owner — better everyone sees it once
+ * than no one gets notified at all. */
+export async function listPushSubscriptionsForOrg(orgId: string): Promise<PushSubscriptionRow[]> {
+  const rows = await db.prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE org_id = ?").all(orgId);
+  return rows as PushSubscriptionRow[];
+}
+
+export type DueAlertForPush = { id: string; orgId: string; title: string; contactOwnerId: string | null };
+
+/** Custom alerts (and the existing "reactivate today" reminders share this
+ * table's `kind`) that are due and haven't been pushed yet. Notifying the
+ * linked contact's owner (the salesperson who actually owns that lead) when
+ * there is one, so the push lands with the person who needs to act on it —
+ * not the whole company. */
+export async function listDueAlertsForPush(): Promise<DueAlertForPush[]> {
+  const rows = await db
+    .prepare(
+      `SELECT ca.id, ca.org_id, ca.title, c.owner_id as contact_owner_id
+       FROM custom_alerts ca LEFT JOIN contacts c ON c.id = ca.contact_id
+       WHERE ca.done = 0 AND ca.notified_push_at IS NULL AND ca.remind_at <= ?`
+    )
+    .all(new Date().toISOString());
+  return rows.map((r: any) => ({ id: r.id, orgId: r.org_id, title: r.title, contactOwnerId: r.contact_owner_id }));
+}
+
+export async function markAlertPushNotified(alertId: string): Promise<void> {
+  await db.prepare("UPDATE custom_alerts SET notified_push_at = ? WHERE id = ?").run(new Date().toISOString(), alertId);
+}
+
+export type DueTaskForPush = { id: string; orgId: string; title: string; dueDate: string; ownerId: string | null };
+
+/** Tasks due today or tomorrow, not yet pushed — "tomorrow" as well as
+ * "today" so a task due first thing in the morning still gets a heads-up
+ * the evening before, not only once it's already due. */
+export async function listTasksDueSoonForPush(): Promise<DueTaskForPush[]> {
+  const tomorrowEnd = new Date();
+  tomorrowEnd.setDate(tomorrowEnd.getDate() + 1);
+  tomorrowEnd.setHours(23, 59, 59, 999);
+  const rows = await db
+    .prepare(
+      `SELECT id, org_id, title, due_date, owner_id
+       FROM tasks
+       WHERE done = 0 AND notified_push_at IS NULL AND due_date IS NOT NULL AND due_date <= ?`
+    )
+    .all(tomorrowEnd.toISOString());
+  return rows.map((r: any) => ({ id: r.id, orgId: r.org_id, title: r.title, dueDate: r.due_date, ownerId: r.owner_id }));
+}
+
+export async function markTaskPushNotified(taskId: string): Promise<void> {
+  await db.prepare("UPDATE tasks SET notified_push_at = ? WHERE id = ?").run(new Date().toISOString(), taskId);
+}

@@ -285,6 +285,20 @@ CREATE TABLE IF NOT EXISTS feature_interest_responses (
   created_at TEXT NOT NULL,
   UNIQUE(feature, user_id)
 );
+
+-- Real Web Push subscriptions (one row per browser/device a user enabled
+-- notifications on -- a salesperson with a phone and a laptop gets two
+-- rows). endpoint is unique because it IS the device+browser's push
+-- channel URL; re-subscribing the same device just updates its keys.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 async function columnsOf(table: string): Promise<string[]> {
@@ -325,7 +339,12 @@ async function initDb(): Promise<void> {
   await addMissingColumns("custom_alerts", [
     ["kind", "TEXT NOT NULL DEFAULT 'general'"],
     ["contact_id", "TEXT REFERENCES contacts(id)"],
+    // Set once a push notification has actually been sent for this alert,
+    // so the /api/push/cron sweep (which can run every ~15 min) never
+    // re-notifies the same due reminder on every pass.
+    ["notified_push_at", "TEXT"],
   ]);
+  await addMissingColumns("tasks", [["notified_push_at", "TEXT"]]);
   await addMissingColumns("integrations", [
     ["access_token", "TEXT"],
     ["refresh_token", "TEXT"],

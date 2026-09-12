@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { applyStripeSubscription, applyFeaturedSubscription, getOrganization, getOrgBillingContactEmail } from "@/lib/data";
+import { applyStripeSubscription, applyFeaturedSubscription, getOrganization, getOrgBillingContactEmail, listPushSubscriptionsForOrgAdmins } from "@/lib/data";
 import { constructWebhookEvent, getSubscription, normalizeSubscription, StripeNotConfiguredError } from "@/lib/stripe";
 import { sendWelcomeEmail, sendPaymentFailedEmail } from "@/lib/notify";
+import { sendPushToSubscriptions, PushNotConfiguredError } from "@/lib/push";
+
+/** Push is best-effort everywhere in this webhook: a missing VAPID
+ * configuration, or every admin simply not having enabled notifications
+ * yet, must never turn into a failed webhook delivery (Stripe would just
+ * retry the same event forever). The email path above this already covers
+ * the "must not be missed" guarantee. */
+async function pushToOrgAdmins(orgId: string, payload: { title: string; body: string; url?: string }): Promise<void> {
+  try {
+    const subs = await listPushSubscriptionsForOrgAdmins(orgId);
+    await sendPushToSubscriptions(subs, payload);
+  } catch (err) {
+    if (!(err instanceof PushNotConfiguredError)) console.error("Push to org admins failed", orgId, err);
+  }
+}
 
 export const runtime = "nodejs";
 
@@ -95,7 +110,34 @@ export async function POST(req: NextRequest) {
               const org = await getOrganization(orgId);
               const email = await getOrgBillingContactEmail(orgId);
               if (org && email) await sendPaymentFailedEmail({ contactEmail: email, orgName: org.name });
+              if (org) {
+                await pushToOrgAdmins(orgId, {
+                  title: "Pagamento non riuscito",
+                  body: `Il pagamento per ${org.name} non è andato a buon fine — aggiorna il metodo di pagamento.`,
+                  url: "/app/settings/billing",
+                });
+              }
             }
+          }
+        }
+        break;
+      }
+      case "customer.subscription.trial_will_end": {
+        // Fires ~3 days before a trial ends (needs to be added as a
+        // subscribed event in the Stripe dashboard webhook config — see
+        // README). Push-only: this is a heads-up, not the "you're now
+        // blocked" moment (that's still handled by the trial actually
+        // expiring), so no email here to avoid doubling up.
+        const sub = event.data.object as Stripe.Subscription;
+        const orgId = sub.metadata?.orgId;
+        if (orgId && sub.metadata?.purpose !== "match_featured") {
+          const org = await getOrganization(orgId);
+          if (org) {
+            await pushToOrgAdmins(orgId, {
+              title: "Prova in scadenza",
+              body: `Il periodo di prova di ${org.name} sta per terminare — scegli un piano per non perdere l'accesso.`,
+              url: "/app/settings/billing",
+            });
           }
         }
         break;

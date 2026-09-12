@@ -2,6 +2,7 @@ import { getSession } from "@/lib/auth";
 import { listIntegrations } from "@/lib/data";
 import { isGoogleConfigured } from "@/lib/google";
 import IntegrationCard from "@/components/IntegrationCard";
+import NotificationsCard from "@/components/NotificationsCard";
 import { Mail, MessageCircle, Calendar, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 const CONFIG = [
@@ -95,6 +96,10 @@ export default async function IntegrationsPage({
             />
           );
         })}
+      </div>
+
+      <div className="mt-4">
+        <NotificationsCard />
       </div>
     </div>
   );

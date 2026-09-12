@@ -83,6 +83,20 @@ What it unlocks once connected: "Send now" on a WhatsApp campaign actually messa
 3. In Pearl, go to Settings → Integrations → WhatsApp Business → "Connect", paste the access token and Phone Number ID, and submit — Pearl calls Meta's API right away to confirm they work before marking it connected.
 4. **Important limitation to know about**: Meta only allows free-form text messages within 24 hours of the customer's last message to you (the "customer service window"). Outside that window, only a pre-approved message **template** can be sent. Pearl's campaign send uses free-form text — great for following up an active conversation, not guaranteed for cold outbound to a whole segment. Template support can be added later if you need it for broader campaigns.
 
+## Push notifications ("never forget a follow-up")
+
+Real Web Push — an actual OS-level notification on a salesperson's phone, even with Pearl closed — for reminders/alerts that just became due, tasks due today or tomorrow, a failed payment, or a trial about to end. Three pieces:
+
+1. **VAPID keys** (identify this app to the push services — not a secret you need to obtain from anywhere, just a keypair generated once for this project):
+   - `VAPID_PUBLIC_KEY`: `BIR4HVC9Nk_YbXzgWvtmEqk5vAPIJtK8hrABVxRHw_uHX5uIMR3uQDa1j2mD-Kv5jWpOdhL9PRm76B34uZB9aoA`
+   - `VAPID_PRIVATE_KEY`: `MAKYN-AXseObJrBvSzEEkGso1Kln0H-SDY7xW_Yx6Cg`
+   - `VAPID_SUBJECT`: `mailto:ceo@ahead-llc.com` (any contact address works)
+   - Add all three as environment variables on Netlify/Vercel, then redeploy. (If you'd rather generate your own pair instead of using these: `npx web-push generate-vapid-keys`.)
+2. **The 15-minute sweep** for due reminders/tasks needs the same kind of external "ping this URL on a schedule" cron already used for billing (see `CRON_SECRET` below) — set up a second free cron job (e.g. on [cron-job.org](https://cron-job.org)) hitting `GET {your-domain}/api/push/cron?token=CRON_SECRET` every 15 minutes. Payment-failed and trial-ending pushes don't need this — they fire immediately from the Stripe webhook instead.
+3. **One more Stripe webhook event**: in the Stripe dashboard, on the webhook endpoint you already created (see the Stripe setup in `src/lib/stripe.ts`), add `customer.subscription.trial_will_end` to the list of subscribed events (alongside the ones already there) — that's what triggers the "trial about to end" push.
+
+Each salesperson then turns notifications on themselves, once, from **Settings → Integrations → Notifiche push → "Attiva notifiche"** — this only works with Pearl installed to the phone's home screen (not a regular browser tab), and on iPhone needs iOS 16.4 or newer.
+
 ## Database (Postgres via Neon)
 
 Pearl stores everything in Postgres, via the `pg` client (`src/lib/db.ts`) — no ORM, plain SQL, same shape of queries throughout `src/lib/data.ts`.
