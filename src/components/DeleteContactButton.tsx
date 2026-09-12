@@ -6,9 +6,11 @@ import { Trash2 } from "lucide-react";
 
 /**
  * Small delete icon used both inline in the contacts table and on the
- * contact detail page. Asks for confirmation with a native `confirm()`
- * (no custom modal needed for something this destructive-but-rare), then
- * calls the DELETE endpoint and refreshes the list/page.
+ * contact detail page. Confirms with a same-page click-to-arm/click-again
+ * step rather than window.confirm() — the native dialog is unreliable
+ * inside a home-screen-installed PWA on iOS (see ContactsTable.tsx's bulk
+ * delete for the incident that surfaced this) — then calls the DELETE
+ * endpoint and refreshes the list/page.
  *
  * `redirectTo` is used on the detail page — after deleting the contact
  * you're currently looking at, there's no page left to refresh, so we

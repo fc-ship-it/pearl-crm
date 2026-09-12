@@ -14,6 +14,7 @@ export default function SponsorsPanel({ sponsors }: { sponsors: Sponsor[] }) {
   const [form, setForm] = useState(empty);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   function set<K extends keyof typeof empty>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -50,8 +51,20 @@ export default function SponsorsPanel({ sponsors }: { sponsors: Sponsor[] }) {
     }
   }
 
-  async function remove(id: string) {
-    if (!window.confirm("Rimuovere questo sponsor dalla directory?")) return;
+  function remove(id: string) {
+    // Same click-to-arm/click-to-confirm pattern as the contacts bulk
+    // delete — window.confirm() is unreliable inside a home-screen-installed
+    // PWA on iOS, so it's avoided everywhere destructive actions happen.
+    if (confirmingId !== id) {
+      setConfirmingId(id);
+      setTimeout(() => setConfirmingId((cur) => (cur === id ? null : cur)), 5000);
+      return;
+    }
+    setConfirmingId(null);
+    doRemove(id);
+  }
+
+  async function doRemove(id: string) {
     setBusy(true);
     try {
       await fetch(`/api/owner/sponsors/${id}`, { method: "DELETE" });
@@ -185,7 +198,7 @@ export default function SponsorsPanel({ sponsors }: { sponsors: Sponsor[] }) {
                       className="px-2.5 py-1 rounded-lg text-xs disabled:opacity-50"
                       style={{ background: "rgba(229,72,77,0.1)", border: "1px solid var(--danger)", color: "var(--danger)" }}
                     >
-                      Elimina
+                      {confirmingId === s.id ? "Conferma?" : "Elimina"}
                     </button>
                   </td>
                 </tr>

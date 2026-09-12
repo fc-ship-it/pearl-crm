@@ -23,6 +23,7 @@ import DeleteContactButton from "@/components/DeleteContactButton";
 export default function ContactsTable({ contacts }: { contacts: Contact[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -42,24 +43,36 @@ export default function ContactsTable({ contacts }: { contacts: Contact[] }) {
     setSelected((prev) => (prev.size === contacts.length ? new Set() : new Set(contacts.map((c) => c.id))));
   }
 
-  async function deleteSelected() {
+  function deleteSelected() {
     if (selected.size === 0) return;
-    const count = selected.size;
-    if (!window.confirm(`Delete ${count} contact${count === 1 ? "" : "s"}? This can't be undone.`)) return;
-    setDeleting(true);
-    try {
-      const res = await fetch("/api/contacts", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selected) }),
-      });
-      setDeleting(false);
-      if (!res.ok) return;
-      setSelected(new Set());
-      startTransition(() => router.refresh());
-    } catch {
-      setDeleting(false);
+    // Deliberately not window.confirm() here: it's unreliable inside a
+    // home-screen-installed PWA on iOS (WebKit sometimes just swallows the
+    // native dialog in standalone mode), which silently turned this button
+    // into a no-op for exactly this kind of bulk cleanup. A same-page
+    // click-to-arm/click-to-confirm step (same pattern as the single-contact
+    // delete button) works everywhere instead.
+    if (!confirming) {
+      setConfirming(true);
+      setTimeout(() => setConfirming(false), 5000);
+      return;
     }
+    setConfirming(false);
+    setDeleting(true);
+    (async () => {
+      try {
+        const res = await fetch("/api/contacts", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: Array.from(selected) }),
+        });
+        setDeleting(false);
+        if (!res.ok) return;
+        setSelected(new Set());
+        startTransition(() => router.refresh());
+      } catch {
+        setDeleting(false);
+      }
+    })();
   }
 
   const rows = useMemo(() => contacts, [contacts]);
@@ -84,7 +97,12 @@ export default function ContactsTable({ contacts }: { contacts: Contact[] }) {
             className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60"
             style={{ background: "var(--danger, #e5484d)", color: "#fff" }}
           >
-            <Trash2 size={13} /> {deleting || isPending ? "Deleting…" : `Delete selected (${selected.size})`}
+            <Trash2 size={13} />
+            {deleting || isPending
+              ? "Deleting…"
+              : confirming
+              ? `Tap again to confirm (${selected.size})`
+              : `Delete selected (${selected.size})`}
           </button>
         </div>
       )}
