@@ -11,11 +11,16 @@ export function appUrl(): string {
   return (process.env.APP_URL || "https://pearl-crm.netlify.app").replace(/\/+$/, "");
 }
 
-async function sendEmail(to: string, subject: string, text: string): Promise<void> {
+// Returns whether the email was actually accepted by Resend — most callers
+// (signup, billing events) are fire-and-forget and ignore this, but the
+// owner-triggered "resend welcome email" action needs to tell Federica
+// whether it really went out or is still blocked (e.g. sandbox mode),
+// rather than always claiming success.
+async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn(`[notify] RESEND_API_KEY not set — skipped email "${subject}" to ${to}`);
-    return;
+    return false;
   }
   try {
     const res = await fetch("https://api.resend.com/emails", {
@@ -43,9 +48,12 @@ async function sendEmail(to: string, subject: string, text: string): Promise<voi
       // RESEND_FROM_EMAIL to an address on it, e.g. "Pearl <noreply@your-domain.com>".
       const body = await res.text().catch(() => "");
       console.error(`[notify] Resend rejected email "${subject}" to ${to}: ${res.status} ${body}`);
+      return false;
     }
+    return true;
   } catch (err) {
     console.error(`[notify] Failed to reach Resend for email "${subject}" to ${to}`, err);
+    return false;
   }
 }
 
@@ -78,10 +86,10 @@ export async function notifyOwnerOfSignup(info: {
 // domain, mail can only be delivered to the account owner's own verified
 // email address — verify a domain in Resend for this to reach real
 // customers. See RESEND_FROM_EMAIL in the README.
-export async function sendWelcomeEmail(info: { contactName: string; contactEmail: string; orgName: string }) {
+export async function sendWelcomeEmail(info: { contactName: string; contactEmail: string; orgName: string }): Promise<boolean> {
   const firstName = info.contactName.trim().split(/\s+/)[0] || info.contactName;
   const url = appUrl();
-  await sendEmail(
+  return sendEmail(
     info.contactEmail,
     "Welcome to Pearl — your 7-day trial has started",
     [
