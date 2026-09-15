@@ -2,7 +2,6 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   ArrowRight,
-  Star,
   Check,
   Minus,
   Kanban,
@@ -12,11 +11,24 @@ import {
   BarChart3,
   Users,
   ShieldCheck,
+  MessageCircle,
+  CalendarDays,
 } from "lucide-react";
 import InteractivePipelineDemo from "@/components/landing/InteractivePipelineDemo";
 import RoiCalculator from "@/components/landing/RoiCalculator";
 import FaqAccordion from "@/components/landing/FaqAccordion";
 import ChatWidget from "@/components/landing/ChatWidget";
+import SegmentTabs from "@/components/landing/SegmentTabs";
+
+// Kept honest and in sync with the FAQ below: Gmail and Calendar are native
+// today, WhatsApp Business connects at go-live (official Meta approval is
+// outside our control) — see FaqAccordion's "Does it integrate with my
+// tools?" answer. Don't mark WhatsApp "live" here before that answer changes.
+const INTEGRATIONS = [
+  { icon: Mail, label: "Gmail", status: "Live" },
+  { icon: CalendarDays, label: "Google Calendar", status: "Live" },
+  { icon: MessageCircle, label: "WhatsApp Business", status: "At go-live" },
+];
 
 const FEATURES = [
   { icon: Kanban, title: "Visual pipeline", desc: "Drag&drop kanban with value, probability and forecast per stage." },
@@ -25,6 +37,28 @@ const FEATURES = [
   { icon: Mail, title: "Gmail, WhatsApp, Calendar", desc: "Every email, message and appointment in the contact's timeline." },
   { icon: BarChart3, title: "Widget dashboard", desc: "Pipeline, alerts, activity and monthly performance at a glance." },
   { icon: Users, title: "Team or individual view", desc: "The sales director sees everything, the rep sees their own." },
+];
+
+// Real client quotes only — add {quote, name, company} entries here once
+// Federica shares them. The section below renders nothing at all while this
+// stays empty, so the live site never shows a placeholder or invented quote
+// standing in for a testimonial. See conversation: never fabricate reviews.
+const TESTIMONIALS: { quote: string; name: string; company?: string }[] = [
+  {
+    quote:
+      "Utilizzo CRM Pearl da qualche mese e mi sto trovando molto bene. È intuitivo, ordinato e permette di gestire clienti, contatti e attività in modo molto più semplice rispetto ad altri CRM che avevo provato.",
+    name: "Sandra",
+  },
+  {
+    quote:
+      "Pearl mi ha semplificato davvero tanto il lavoro quotidiano. Prima perdevo tempo tra fogli Excel, messaggi e appunti, ora riesco a trovare tutto velocemente e a seguire meglio ogni cliente.",
+    name: "Ashraf",
+  },
+  {
+    quote:
+      "La piattaforma è veloce, semplice da capire e molto ben organizzata. Mi aiuta a gestire meglio le attività, a non dimenticare follow-up importanti e ad avere una visione molto più chiara dei clienti.",
+    name: "Paola",
+  },
 ];
 
 export default function LandingPage() {
@@ -89,9 +123,6 @@ export default function LandingPage() {
             </Link>
           </div>
           <div className="flex items-center gap-2 mt-6 text-xs" style={{ color: "var(--ink-dim)" }}>
-            <div className="flex text-[13px]" style={{ color: "var(--gold)" }}>
-              {"★★★★★"}
-            </div>
             <span>Built on the AHEAD LLC AI-first method</span>
           </div>
         </div>
@@ -114,15 +145,27 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* SOCIAL PROOF STRIP */}
+      {/* SOCIAL PROOF STRIP — only claims we can actually stand behind;
+          no star rating here until there's a real, verifiable score to show */}
       <section className="border-y" style={{ borderColor: "var(--border)" }}>
         <div className="max-w-[1200px] mx-auto px-5 py-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-xs" style={{ color: "var(--ink-dim)" }}>
-          <span className="flex items-center gap-1">
-            <Star size={13} color="var(--gold)" fill="var(--gold)" /> 4.9/5 average rating
-          </span>
           <span>Built for sales teams across the UAE 🇦🇪 and beyond</span>
+          <span>7-day free trial, cancel any time before day 7</span>
           <span>Support in English</span>
         </div>
+      </section>
+
+      {/* WHO IT'S FOR — segmented pitch, same real features re-framed per audience */}
+      <section className="max-w-[1200px] mx-auto px-5 py-16">
+        <div className="text-center max-w-[600px] mx-auto mb-10">
+          <span className="text-[10px] uppercase tracking-wide" style={{ color: "var(--magenta)" }}>
+            Built for however you sell
+          </span>
+          <h2 className="font-display text-2xl mt-2" style={{ color: "var(--ink)" }}>
+            From a full sales floor to a single desk.
+          </h2>
+        </div>
+        <SegmentTabs />
       </section>
 
       {/* FEATURES */}
@@ -157,6 +200,35 @@ export default function LandingPage() {
           <span className="text-xs px-3 py-1.5 rounded-full font-mono" style={{ background: "var(--panel-2)", color: "var(--gold)" }}>
             +20 features
           </span>
+        </div>
+
+        {/* INTEGRATIONS */}
+        <div className="mt-10 text-center">
+          <span className="text-[10px] uppercase tracking-wide" style={{ color: "var(--cyan)" }}>
+            Connects with
+          </span>
+          <div className="flex flex-wrap justify-center gap-3 mt-4">
+            {INTEGRATIONS.map((i) => (
+              <div
+                key={i.label}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
+                style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" }}
+              >
+                <i.icon size={15} color="var(--ink-dim)" />
+                {i.label}
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-full"
+                  style={
+                    i.status === "Live"
+                      ? { background: "rgba(52,211,153,0.15)", color: "var(--success)" }
+                      : { background: "var(--panel)", color: "var(--ink-dim)" }
+                  }
+                >
+                  {i.status}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -195,6 +267,33 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* TESTIMONIALS — real client quotes only, see TESTIMONIALS above */}
+      {TESTIMONIALS.length > 0 && (
+        <section className="max-w-[1200px] mx-auto px-5 py-16">
+          <div className="text-center max-w-[600px] mx-auto mb-10">
+            <span className="text-[10px] uppercase tracking-wide" style={{ color: "var(--gold)" }}>
+              What our customers say
+            </span>
+            <h2 className="font-display text-2xl mt-2" style={{ color: "var(--ink)" }}>
+              Real teams, real results.
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {TESTIMONIALS.map((t) => (
+              <div key={t.name} className="card p-5">
+                <p className="text-sm mb-4" style={{ color: "var(--ink)" }}>
+                  “{t.quote}”
+                </p>
+                <div className="text-xs" style={{ color: "var(--ink-dim)" }}>
+                  <span style={{ color: "var(--ink)" }}>{t.name}</span>
+                  {t.company ? ` — ${t.company}` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ROI CALCULATOR */}
       <section className="max-w-[900px] mx-auto px-5 py-16">
@@ -289,7 +388,7 @@ export default function LandingPage() {
           </div>
         </div>
         <div className="text-center text-[11px] pb-6" style={{ color: "var(--ink-dim)" }}>
-          © {new Date().getFullYear()} AHEAD LLC. All rights reserved. Demo MVP — sample data.
+          © {new Date().getFullYear()} AHEAD LLC. All rights reserved.
         </div>
       </footer>
 
