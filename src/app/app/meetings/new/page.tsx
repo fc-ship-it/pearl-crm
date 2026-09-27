@@ -4,8 +4,10 @@ import NewMeetingForm from "@/components/NewMeetingForm";
 
 export default async function NewMeetingPage() {
   const session = await getSession();
-  const contacts = await listContacts(session!.orgId);
-  const deals = await listDeals(session!.orgId);
+  // A "SALES" teammate logs a meeting against one of their own contacts/deals.
+  const viewerOwnerId = session!.role === "ADMIN" ? undefined : session!.userId;
+  const contacts = await listContacts(session!.orgId, {}, viewerOwnerId);
+  const deals = await listDeals(session!.orgId, viewerOwnerId);
 
   return (
     <div className="max-w-[700px]">

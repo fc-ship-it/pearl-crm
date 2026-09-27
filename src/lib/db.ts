@@ -125,6 +125,12 @@ CREATE TABLE IF NOT EXISTS organizations (
   created_at TEXT NOT NULL
 );
 
+-- 'role' is a free-text column, not a DB-level enum, but the app only ever
+-- writes two values: 'ADMIN' (the person who signed up, or anyone they add
+-- with full access -- sees the whole org's contacts/deals/dashboard) and
+-- 'SALES' (a teammate added from Settings -> Team -- sees only their own
+-- contacts/deals, everywhere the app lists them). See listOrgUsers/
+-- createTeamMember in src/lib/data.ts.
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES organizations(id),
@@ -299,6 +305,25 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   auth TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+-- Per-USER (not per-org) Gmail/Outlook connections, so each teammate in an
+-- org can connect their own mailbox/calendar independently -- unlike the
+-- org-wide integrations table above (still used for WhatsApp, which is one
+-- shared company number in real life, not a per-person thing). provider is
+-- one of "gmail" / "calendar" / "outlook_mail" / "outlook_calendar".
+CREATE TABLE IF NOT EXISTS user_integrations (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  provider TEXT NOT NULL,
+  connected INTEGER NOT NULL DEFAULT 0,
+  connected_at TEXT,
+  access_token TEXT,
+  refresh_token TEXT,
+  token_expiry TEXT,
+  extra TEXT,
+  UNIQUE(user_id, provider)
+);
 `;
 
 async function columnsOf(table: string): Promise<string[]> {
@@ -345,6 +370,9 @@ async function initDb(): Promise<void> {
     ["notified_push_at", "TEXT"],
   ]);
   await addMissingColumns("tasks", [["notified_push_at", "TEXT"]]);
+  // Team members (Settings -> Team): blocks a teammate's login without
+  // touching the contacts/deals/tasks they own — see deactivateTeamMember.
+  await addMissingColumns("users", [["deactivated_at", "TEXT"]]);
   await addMissingColumns("integrations", [
     ["access_token", "TEXT"],
     ["refresh_token", "TEXT"],

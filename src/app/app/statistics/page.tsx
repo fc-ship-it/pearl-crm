@@ -15,9 +15,12 @@ import { TrendingUp, Trophy, Users, Flame } from "lucide-react";
 export default async function StatisticsPage() {
   const session = await getSession();
   const orgId = session!.orgId;
-  const stats = await dashboardStats(orgId);
-  const deals = await listDeals(orgId);
-  const contacts = await listContacts(orgId);
+  // A "SALES" teammate sees only their own statistics; an ADMIN sees the
+  // whole team's, same as before Settings -> Team existed.
+  const viewerOwnerId = session!.role === "ADMIN" ? undefined : session!.userId;
+  const stats = await dashboardStats(orgId, viewerOwnerId);
+  const deals = await listDeals(orgId, viewerOwnerId);
+  const contacts = await listContacts(orgId, {}, viewerOwnerId);
   const hotCount = contacts.filter((c) => c.temperature === "hot").length;
 
   return (

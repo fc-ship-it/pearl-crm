@@ -4,7 +4,10 @@ import PipelineBoard from "@/components/PipelineBoard";
 
 export default async function PipelinePage() {
   const session = await getSession();
-  const deals = await listDeals(session!.orgId);
+  // A "SALES" teammate only ever sees deals assigned to them; an ADMIN sees
+  // the whole team's pipeline, same as before Settings -> Team existed.
+  const viewerOwnerId = session!.role === "ADMIN" ? undefined : session!.userId;
+  const deals = await listDeals(session!.orgId, viewerOwnerId);
 
   return (
     <div className="max-w-[1400px]">

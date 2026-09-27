@@ -5,7 +5,7 @@
 // Integrations. See README.md → "Collegare Google Calendar e Gmail" for the
 // exact Google Cloud Console setup steps.
 
-import { getIntegration, saveIntegrationCredentials } from "@/lib/data";
+import { getIntegration, saveIntegrationCredentials, getUserIntegration, saveUserIntegrationCredentials } from "@/lib/data";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -90,15 +90,18 @@ async function getUserEmail(accessToken: string): Promise<string | null> {
 }
 
 /** Completes the OAuth dance after Google redirects back with a `code`, and
- * stores the resulting tokens for BOTH the "gmail" and "calendar" rows — a
- * single Google account grants both scopes at once, matching how the two
- * integration cards in Settings behave in real life. */
-export async function completeGoogleConnect(orgId: string, code: string, redirectUri: string) {
+ * stores the resulting tokens for BOTH the "gmail" and "calendar" rows,
+ * scoped to the ONE teammate (userId) who just connected — a single Google
+ * account grants both scopes at once, matching how the two integration
+ * cards in Settings behave in real life, but each teammate in an org
+ * connects their own account independently (see user_integrations in
+ * src/lib/db.ts and Settings -> Team). */
+export async function completeGoogleConnect(orgId: string, userId: string, code: string, redirectUri: string) {
   const tokens = await exchangeCodeForTokens(code, redirectUri);
   const expiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
   const email = await getUserEmail(tokens.access_token);
   for (const provider of ["gmail", "calendar"]) {
-    await saveIntegrationCredentials(orgId, provider, {
+    await saveUserIntegrationCredentials(orgId, userId, provider, {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token, // present only on first consent
       tokenExpiry: expiry,
@@ -108,18 +111,34 @@ export async function completeGoogleConnect(orgId: string, code: string, redirec
   return email;
 }
 
-/** Returns a valid access token for the org's connected Google account,
- * refreshing it first if it has expired. Returns null if not connected. */
-export async function getValidGoogleAccessToken(orgId: string): Promise<string | null> {
-  const row = (await getIntegration(orgId, "calendar")) || (await getIntegration(orgId, "gmail"));
+/** Returns a valid access token for this ONE teammate's connected Google
+ * account, refreshing it first if it has expired. Falls back to the org-wide
+ * "calendar"/"gmail" row (the pre-Team-feature connection) when this
+ * specific user hasn't personally connected one — so an org that connected
+ * Google before Settings -> Team existed keeps working exactly as before,
+ * for whoever is the sole/first user. Returns null if neither is connected. */
+export async function getValidGoogleAccessToken(orgId: string, userId: string): Promise<string | null> {
+  const row =
+    (await getUserIntegration(userId, "calendar")) ||
+    (await getUserIntegration(userId, "gmail")) ||
+    (await getIntegration(orgId, "calendar")) ||
+    (await getIntegration(orgId, "gmail"));
   if (!row || !row.connected || !row.access_token) return null;
   const expired = !row.token_expiry || new Date(row.token_expiry).getTime() <= Date.now() + 60_000;
   if (!expired) return row.access_token;
   if (!row.refresh_token) return row.access_token; // best effort — will fail upstream if truly expired
   const refreshed = await refreshAccessToken(row.refresh_token);
   const expiry = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
+  // Whichever table this token actually came from is the one to update — a
+  // personal user_integrations row for this user if they have one, otherwise
+  // the legacy org-wide row.
+  const hasOwnConnection = await getUserIntegration(userId, "calendar");
   for (const provider of ["gmail", "calendar"]) {
-    await saveIntegrationCredentials(orgId, provider, { accessToken: refreshed.access_token, tokenExpiry: expiry });
+    if (hasOwnConnection) {
+      await saveUserIntegrationCredentials(orgId, userId, provider, { accessToken: refreshed.access_token, tokenExpiry: expiry });
+    } else {
+      await saveIntegrationCredentials(orgId, provider, { accessToken: refreshed.access_token, tokenExpiry: expiry });
+    }
   }
   return refreshed.access_token;
 }

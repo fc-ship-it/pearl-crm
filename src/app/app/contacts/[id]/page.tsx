@@ -11,7 +11,10 @@ const ICONS: Record<string, any> = { mail: Mail, phone: Phone, "message-circle":
 export default async function ContactDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getSession();
-  const contact = await getContact(session!.orgId, id);
+  // A "SALES" teammate can't open another teammate's contact by guessing its
+  // id — getContact returns null (→ 404) if they don't own it.
+  const viewerOwnerId = session!.role === "ADMIN" ? undefined : session!.userId;
+  const contact = await getContact(session!.orgId, id, viewerOwnerId);
   if (!contact) notFound();
 
   const activities = await listActivitiesForContact(session!.orgId, id);

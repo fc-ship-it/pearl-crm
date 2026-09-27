@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sendCampaign, getCampaign, audienceForSegment } from "@/lib/data";
 import { getValidGoogleAccessToken, sendGmail } from "@/lib/google";
+import { getValidOutlookAccessToken, sendOutlookMail } from "@/lib/outlook";
 import { getWhatsAppCreds, sendWhatsAppMessage } from "@/lib/whatsapp";
 
 export const runtime = "nodejs";
@@ -34,14 +35,23 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const errors: string[] = [];
 
   if (campaign.channel === "email") {
-    const accessToken = await getValidGoogleAccessToken(session.orgId).catch(() => null);
+    // An org can have both Gmail and Outlook connected at once (each is its
+    // own row in `integrations`) — Gmail is tried first when both are
+    // available, purely for a stable, predictable "From" mailbox; either one
+    // alone is enough to send.
+    const googleToken = await getValidGoogleAccessToken(session.orgId, session.userId).catch(() => null);
+    const outlookToken = googleToken ? null : await getValidOutlookAccessToken(session.orgId, session.userId).catch(() => null);
     for (const contact of audience) {
-      if (!accessToken || !contact.email) {
+      if ((!googleToken && !outlookToken) || !contact.email) {
         skipped++;
         continue;
       }
       try {
-        await sendGmail(accessToken, { toEmail: contact.email, subject: campaign.title, bodyText: campaign.message });
+        if (googleToken) {
+          await sendGmail(googleToken, { toEmail: contact.email, subject: campaign.title, bodyText: campaign.message });
+        } else if (outlookToken) {
+          await sendOutlookMail(outlookToken, { toEmail: contact.email, subject: campaign.title, bodyText: campaign.message });
+        }
         delivered++;
       } catch (e) {
         failed++;

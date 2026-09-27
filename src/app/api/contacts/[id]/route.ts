@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { setContactTemperature, deleteContact, LEAD_TEMPERATURES } from "@/lib/data";
+import { setContactTemperature, deleteContact, getContact, LEAD_TEMPERATURES } from "@/lib/data";
 
 export const runtime = "nodejs";
 
@@ -11,6 +11,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
+
+  // A "SALES" teammate can only edit their own contacts.
+  if (session.role !== "ADMIN") {
+    const owned = await getContact(session.orgId, id, session.userId);
+    if (!owned) return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   if ("temperature" in body) {
     const temp = body.temperature;
@@ -27,6 +33,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
+  // A "SALES" teammate can only delete their own contacts.
+  if (session.role !== "ADMIN") {
+    const owned = await getContact(session.orgId, id, session.userId);
+    if (!owned) return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
   await deleteContact(session.orgId, id);
   return NextResponse.json({ ok: true });
 }

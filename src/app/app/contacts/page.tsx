@@ -17,8 +17,11 @@ export default async function ContactsPage({
     targetSegment: sp.targetSegment || undefined,
     rawImportsOnly: sp.rawImports === "1",
   };
-  const contacts = await listContacts(session!.orgId, filters);
-  const allContacts = await listContacts(session!.orgId);
+  // A "SALES" teammate only ever sees contacts assigned to them; an ADMIN
+  // sees the whole org's, same as before Settings -> Team existed.
+  const viewerOwnerId = session!.role === "ADMIN" ? undefined : session!.userId;
+  const contacts = await listContacts(session!.orgId, filters, viewerOwnerId);
+  const allContacts = await listContacts(session!.orgId, {}, viewerOwnerId);
   const segments = Array.from(new Set(allContacts.map((c) => c.targetSegment).filter(Boolean))) as string[];
   const hasFilters = !!(filters.interest || filters.budgetTier || filters.targetSegment || filters.rawImportsOnly);
 

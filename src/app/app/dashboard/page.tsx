@@ -10,10 +10,13 @@ import { TrendingUp, AlertTriangle, Trophy, Percent, BellRing } from "lucide-rea
 export default async function DashboardPage() {
   const session = await getSession();
   const orgId = session!.orgId;
-  const stats = await dashboardStats(orgId);
-  const tasks = (await listTasks(orgId, { onlyOpen: true })).slice(0, 6);
+  // A "SALES" teammate sees only their own numbers/contacts/tasks; an ADMIN
+  // sees the whole team's, same as before Settings -> Team existed.
+  const viewerOwnerId = session!.role === "ADMIN" ? undefined : session!.userId;
+  const stats = await dashboardStats(orgId, viewerOwnerId);
+  const tasks = (await listTasks(orgId, { onlyOpen: true, viewerOwnerId })).slice(0, 6);
   const meetings = (await listMeetings(orgId)).slice(0, 3);
-  const contacts = await listContacts(orgId);
+  const contacts = await listContacts(orgId, {}, viewerOwnerId);
   const showInterestBanner = !(await hasAnsweredFeatureInterest(session!.userId));
 
   return (
@@ -155,7 +158,7 @@ export default async function DashboardPage() {
           <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
             Pipeline by stage
           </h2>
-          <PipelineMiniBars orgId={orgId} />
+          <PipelineMiniBars orgId={orgId} viewerOwnerId={viewerOwnerId} />
         </div>
 
         <div className="card p-5">
@@ -200,8 +203,8 @@ function StatCard({
   );
 }
 
-async function PipelineMiniBars({ orgId }: { orgId: string }) {
-  const deals: Deal[] = await listDeals(orgId);
+async function PipelineMiniBars({ orgId, viewerOwnerId }: { orgId: string; viewerOwnerId?: string }) {
+  const deals: Deal[] = await listDeals(orgId, viewerOwnerId);
   const byStage = new Map<string, number>();
   deals.forEach((d) => byStage.set(d.stage, (byStage.get(d.stage) || 0) + d.value));
   const max = Math.max(1, ...Array.from(byStage.values()));

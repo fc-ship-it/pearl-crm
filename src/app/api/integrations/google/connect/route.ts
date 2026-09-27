@@ -15,6 +15,10 @@ export async function GET(req: NextRequest) {
   }
 
   const redirectUri = new URL("/api/integrations/google/callback", getAppBaseUrl(req.url)).toString();
-  const authUrl = buildGoogleAuthUrl(redirectUri, session.orgId);
+  // `state` carries BOTH orgId and userId (dot-separated — neither id ever
+  // contains a dot) so the callback below knows exactly which teammate's
+  // personal connection to save this to, without relying on the session
+  // cookie still being readable on Google's redirect back.
+  const authUrl = buildGoogleAuthUrl(redirectUri, `${session.orgId}.${session.userId}`);
   return NextResponse.redirect(authUrl);
 }

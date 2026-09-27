@@ -9,18 +9,21 @@ export const runtime = "nodejs";
 // context on this GET request from Google's side.
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
-  const orgId = req.nextUrl.searchParams.get("state");
+  const state = req.nextUrl.searchParams.get("state");
   const error = req.nextUrl.searchParams.get("error");
   const settingsUrl = new URL("/app/settings/integrations", req.url);
 
-  if (error || !code || !orgId) {
+  // state = "<orgId>.<userId>" — see /connect above.
+  const [orgId, userId] = state ? state.split(".") : [null, null];
+
+  if (error || !code || !orgId || !userId) {
     settingsUrl.searchParams.set("error", error || "google_missing_code");
     return NextResponse.redirect(settingsUrl);
   }
 
   try {
     const redirectUri = new URL("/api/integrations/google/callback", getAppBaseUrl(req.url)).toString();
-    await completeGoogleConnect(orgId, code, redirectUri);
+    await completeGoogleConnect(orgId, userId, code, redirectUri);
     settingsUrl.searchParams.set("connected", "google");
   } catch {
     settingsUrl.searchParams.set("error", "google_token_exchange_failed");

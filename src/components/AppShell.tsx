@@ -19,6 +19,7 @@ import {
   X,
   ChevronsLeft,
   ChevronsRight,
+  UserPlus,
 } from "lucide-react";
 import ReminderNotifier from "@/components/ReminderNotifier";
 
@@ -31,6 +32,7 @@ const NAV = [
   { href: "/app/statistics", label: "Statistics", icon: BarChart3 },
   { href: "/app/network", label: "Business Match", icon: Handshake },
   { href: "/app/settings/integrations", label: "Integrations", icon: Plug },
+  { href: "/app/settings/team", label: "Team", icon: UserPlus, adminOnly: true },
   { href: "/app/settings/billing", label: "Plan & billing", icon: CreditCard },
 ];
 
@@ -51,12 +53,14 @@ export default function AppShell({
   orgName,
   trialDaysLeft,
   plan,
+  isAdmin,
 }: {
   children: React.ReactNode;
   userName: string;
   orgName: string;
   trialDaysLeft: number;
   plan: string;
+  isAdmin: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -98,7 +102,7 @@ export default function AppShell({
 
   const navLinks = (onNavigate?: () => void, iconOnly = false) => (
     <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto overflow-x-hidden">
-      {NAV.map((item) => {
+      {NAV.filter((item) => !item.adminOnly || isAdmin).map((item) => {
         const active = pathname.startsWith(item.href);
         const Icon = item.icon;
         return (

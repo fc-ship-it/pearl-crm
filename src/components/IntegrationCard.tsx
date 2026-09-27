@@ -15,7 +15,8 @@ export default function IntegrationCard({
   icon,
   mode,
   detail,
-  googleConfigured,
+  oauthConnectHref,
+  configured,
 }: {
   provider: string;
   name: string;
@@ -26,7 +27,8 @@ export default function IntegrationCard({
   icon: React.ReactNode;
   mode: "oauth" | "apikey";
   detail: string | null;
-  googleConfigured: boolean;
+  oauthConnectHref?: string;
+  configured: boolean;
 }) {
   const [connected, setConnected] = useState(initialConnected);
   const [loading, setLoading] = useState(false);
@@ -98,16 +100,16 @@ export default function IntegrationCard({
         </button>
       ) : mode === "oauth" ? (
         <a
-          href={`/api/integrations/google/connect`}
+          href={oauthConnectHref || "/api/integrations/google/connect"}
           className="mt-4 text-xs px-3 py-2 rounded-lg text-center disabled:opacity-60"
           style={
-            googleConfigured
+            configured
               ? { background: color, color: "var(--ink)" }
               : { background: "var(--panel-2)", color: "var(--ink-dim)", pointerEvents: "none" }
           }
-          aria-disabled={!googleConfigured}
+          aria-disabled={!configured}
         >
-          {googleConfigured ? "Connect with Google" : "Not configured yet"}
+          {configured ? "Connect" : "Not configured yet"}
         </a>
       ) : showForm ? (
         <form onSubmit={connectWhatsApp} className="mt-4 space-y-2">

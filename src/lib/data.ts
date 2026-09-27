@@ -158,30 +158,50 @@ function toDeal(r: any): Deal {
   };
 }
 
-export async function listDeals(orgId: string): Promise<Deal[]> {
+/**
+ * `viewerOwnerId`: pass the logged-in user's id to restrict results to deals
+ * THEY own (used for a "SALES" role teammate); leave undefined to see the
+ * whole org's deals (ADMIN, or any org that hasn't added teammates). See
+ * Settings -> Team and the `role` column on `users`.
+ */
+export async function listDeals(orgId: string, viewerOwnerId?: string): Promise<Deal[]> {
+  const clauses = ["d.org_id = ?"];
+  const params: any[] = [orgId];
+  if (viewerOwnerId) {
+    clauses.push("d.owner_id = ?");
+    params.push(viewerOwnerId);
+  }
   const rows = await db
     .prepare(
       `SELECT d.*, c.name as contact_name, co.name as company_name
        FROM deals d
        LEFT JOIN contacts c ON c.id = d.contact_id
        LEFT JOIN companies co ON co.id = d.company_id
-       WHERE d.org_id = ?
+       WHERE ${clauses.join(" AND ")}
        ORDER BY d.created_at DESC`
     )
-    .all(orgId);
+    .all(...params);
   return rows.map(toDeal);
 }
 
-export async function getDeal(orgId: string, dealId: string): Promise<Deal | null> {
+/** Same `viewerOwnerId` restriction as listDeals — pass it to make sure a
+ * SALES teammate can't open another teammate's deal by guessing its id. */
+export async function getDeal(orgId: string, dealId: string, viewerOwnerId?: string): Promise<Deal | null> {
+  const clauses = ["d.org_id = ?", "d.id = ?"];
+  const params: any[] = [orgId, dealId];
+  if (viewerOwnerId) {
+    clauses.push("d.owner_id = ?");
+    params.push(viewerOwnerId);
+  }
   const r = await db
     .prepare(
       `SELECT d.*, c.name as contact_name, co.name as company_name
        FROM deals d
        LEFT JOIN contacts c ON c.id = d.contact_id
        LEFT JOIN companies co ON co.id = d.company_id
-       WHERE d.org_id = ? AND d.id = ?`
+       WHERE ${clauses.join(" AND ")}`
     )
-    .get(orgId, dealId);
+    .get(...params);
   return r ? toDeal(r) : null;
 }
 
@@ -248,8 +268,19 @@ export async function deleteContact(orgId: string, contactId: string): Promise<v
  * just one statement per table instead of one per contact per table, which
  * matters once contactIds is in the thousands rather than a handful.
  */
-export async function deleteContacts(orgId: string, contactIds: string[]): Promise<number> {
+export async function deleteContacts(orgId: string, contactIds: string[], viewerOwnerId?: string): Promise<number> {
   if (contactIds.length === 0) return 0;
+  if (viewerOwnerId) {
+    // A "SALES" teammate can only bulk-delete contacts THEY own — narrow the
+    // id list down to that subset first, so a tampered request can't reach
+    // another teammate's contacts (and the cascade deletes below, which key
+    // only off contact_id, stay correctly scoped too).
+    const owned = (await db
+      .prepare("SELECT id FROM contacts WHERE org_id = ? AND owner_id = ? AND id = ANY(?::text[])")
+      .all(orgId, viewerOwnerId, contactIds)) as { id: string }[];
+    contactIds = owned.map((r) => r.id);
+    if (contactIds.length === 0) return 0;
+  }
   await db.prepare("DELETE FROM activities WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
   await db.prepare("DELETE FROM tasks WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
   await db.prepare("DELETE FROM meetings WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
@@ -259,9 +290,18 @@ export async function deleteContacts(orgId: string, contactIds: string[]): Promi
   return result.changes;
 }
 
-export async function listContacts(orgId: string, filters: ContactFilters = {}): Promise<Contact[]> {
+/**
+ * `viewerOwnerId`: pass the logged-in user's id to restrict results to
+ * contacts THEY own (a "SALES" role teammate); leave undefined for the whole
+ * org's contacts (ADMIN). See listDeals above for the same pattern.
+ */
+export async function listContacts(orgId: string, filters: ContactFilters = {}, viewerOwnerId?: string): Promise<Contact[]> {
   const clauses = ["ct.org_id = ?"];
   const params: any[] = [orgId];
+  if (viewerOwnerId) {
+    clauses.push("ct.owner_id = ?");
+    params.push(viewerOwnerId);
+  }
   if (filters.interest) {
     clauses.push("ct.interest LIKE ?");
     params.push(`%${filters.interest}%`);
@@ -292,14 +332,22 @@ export async function listContacts(orgId: string, filters: ContactFilters = {}):
   return rows.map(toContact);
 }
 
-export async function getContact(orgId: string, contactId: string): Promise<Contact | null> {
+/** Same `viewerOwnerId` restriction as listContacts — pass it to make sure a
+ * SALES teammate can't open another teammate's contact by guessing its id. */
+export async function getContact(orgId: string, contactId: string, viewerOwnerId?: string): Promise<Contact | null> {
+  const clauses = ["ct.org_id = ?", "ct.id = ?"];
+  const params: any[] = [orgId, contactId];
+  if (viewerOwnerId) {
+    clauses.push("ct.owner_id = ?");
+    params.push(viewerOwnerId);
+  }
   const r = await db
     .prepare(
       `SELECT ct.*, co.name as company_name
        FROM contacts ct LEFT JOIN companies co ON co.id = ct.company_id
-       WHERE ct.org_id = ? AND ct.id = ?`
+       WHERE ${clauses.join(" AND ")}`
     )
-    .get(orgId, contactId);
+    .get(...params);
   return r ? toContact(r) : null;
 }
 
@@ -428,17 +476,26 @@ function toTask(r: any): TaskRow {
   };
 }
 
-export async function listTasks(orgId: string, opts: { onlyOpen?: boolean } = {}): Promise<TaskRow[]> {
+/** `viewerOwnerId`: same restriction as listContacts/listDeals — a SALES
+ * teammate sees only tasks assigned to them. */
+export async function listTasks(orgId: string, opts: { onlyOpen?: boolean; viewerOwnerId?: string } = {}): Promise<TaskRow[]> {
+  const clauses = ["t.org_id = ?"];
+  const params: any[] = [orgId];
+  if (opts.onlyOpen) clauses.push("t.done = 0");
+  if (opts.viewerOwnerId) {
+    clauses.push("t.owner_id = ?");
+    params.push(opts.viewerOwnerId);
+  }
   const rows = await db
     .prepare(
       `SELECT t.*, c.name as contact_name, d.title as deal_title
        FROM tasks t
        LEFT JOIN contacts c ON c.id = t.contact_id
        LEFT JOIN deals d ON d.id = t.deal_id
-       WHERE t.org_id = ? ${opts.onlyOpen ? "AND t.done = 0" : ""}
+       WHERE ${clauses.join(" AND ")}
        ORDER BY t.due_date ASC`
     )
-    .all(orgId);
+    .all(...params);
   return rows.map(toTask);
 }
 
@@ -560,6 +617,161 @@ export async function saveIntegrationCredentials(
       )
       .run(newId(), orgId, provider, new Date().toISOString(), creds.accessToken ?? null, creds.refreshToken ?? null, creds.tokenExpiry ?? null, extraJson);
   }
+}
+
+/* ---------------------------------------------------------------------- *
+ * Per-USER integrations (Gmail/Outlook, one connection per teammate) — see
+ * `user_integrations` in src/lib/db.ts. Mirrors the org-wide functions right
+ * above, but keyed by (user_id, provider) instead of (org_id, provider), so
+ * two teammates in the same org can each connect their own mailbox/calendar
+ * independently. WhatsApp deliberately stays on the org-wide table above —
+ * one shared company WhatsApp Business number, not a per-person thing.
+ * ---------------------------------------------------------------------- */
+
+export async function listUserIntegrations(userId: string) {
+  return (await db.prepare("SELECT * FROM user_integrations WHERE user_id = ?").all(userId)) as {
+    id: string;
+    provider: string;
+    connected: number;
+    connected_at: string | null;
+    access_token: string | null;
+    refresh_token: string | null;
+    token_expiry: string | null;
+    extra: string | null;
+  }[];
+}
+
+export async function getUserIntegration(userId: string, provider: string) {
+  return (await db.prepare("SELECT * FROM user_integrations WHERE user_id = ? AND provider = ?").get(userId, provider)) as
+    | {
+        id: string;
+        provider: string;
+        connected: number;
+        connected_at: string | null;
+        access_token: string | null;
+        refresh_token: string | null;
+        token_expiry: string | null;
+        extra: string | null;
+      }
+    | undefined;
+}
+
+export async function saveUserIntegrationCredentials(
+  orgId: string,
+  userId: string,
+  provider: string,
+  creds: { accessToken?: string; refreshToken?: string; tokenExpiry?: string; extra?: Record<string, unknown> }
+): Promise<void> {
+  const existing = (await db
+    .prepare("SELECT id FROM user_integrations WHERE user_id = ? AND provider = ?")
+    .get(userId, provider)) as { id: string } | undefined;
+  const extraJson = creds.extra ? JSON.stringify(creds.extra) : null;
+  if (existing) {
+    await db
+      .prepare(
+        "UPDATE user_integrations SET connected = 1, connected_at = ?, access_token = COALESCE(?, access_token), refresh_token = COALESCE(?, refresh_token), token_expiry = ?, extra = COALESCE(?, extra) WHERE id = ?"
+      )
+      .run(new Date().toISOString(), creds.accessToken ?? null, creds.refreshToken ?? null, creds.tokenExpiry ?? null, extraJson, existing.id);
+  } else {
+    await db
+      .prepare(
+        "INSERT INTO user_integrations (id, org_id, user_id, provider, connected, connected_at, access_token, refresh_token, token_expiry, extra) VALUES (?,?,?,?,1,?,?,?,?,?)"
+      )
+      .run(newId(), orgId, userId, provider, new Date().toISOString(), creds.accessToken ?? null, creds.refreshToken ?? null, creds.tokenExpiry ?? null, extraJson);
+  }
+}
+
+export async function disconnectUserIntegration(userId: string, provider: string): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE user_integrations SET connected = 0, connected_at = NULL, access_token = NULL, refresh_token = NULL, token_expiry = NULL, extra = NULL WHERE user_id = ? AND provider = ?"
+    )
+    .run(userId, provider);
+}
+
+/* ---------------------------------------------------------------------- *
+ * Team members — Settings -> Team. An org starts with the one ADMIN user
+ * created at signup; the ADMIN can add teammates ("SALES" role) from there.
+ * A SALES teammate gets their own login, own connected mailbox/calendar
+ * (see user_integrations above), and only ever sees contacts/deals/tasks
+ * they own (see the `viewerOwnerId` parameter threaded through listContacts/
+ * listDeals/listTasks/dashboardStats above) — an ADMIN always sees everyone's.
+ * ---------------------------------------------------------------------- */
+
+export type TeamRole = "ADMIN" | "SALES";
+
+export type TeamMember = {
+  id: string;
+  name: string;
+  email: string;
+  role: TeamRole;
+  createdAt: string;
+  deactivatedAt: string | null;
+};
+
+function toTeamMember(r: { id: string; name: string; email: string; role: string; created_at: string; deactivated_at?: string | null }): TeamMember {
+  return {
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    role: (r.role as TeamRole) || "SALES",
+    createdAt: r.created_at,
+    deactivatedAt: r.deactivated_at ?? null,
+  };
+}
+
+export async function listOrgUsers(orgId: string): Promise<TeamMember[]> {
+  const rows = (await db
+    .prepare("SELECT id, name, email, role, created_at, deactivated_at FROM users WHERE org_id = ? ORDER BY created_at ASC")
+    .all(orgId)) as { id: string; name: string; email: string; role: string; created_at: string; deactivated_at: string | null }[];
+  return rows.map(toTeamMember);
+}
+
+export async function getUserById(userId: string): Promise<TeamMember | null> {
+  const r = (await db.prepare("SELECT id, name, email, role, created_at, deactivated_at FROM users WHERE id = ?").get(userId)) as
+    | { id: string; name: string; email: string; role: string; created_at: string; deactivated_at: string | null }
+    | undefined;
+  return r ? toTeamMember(r) : null;
+}
+
+export class EmailAlreadyExistsError extends Error {}
+
+/** Creates a teammate under the SAME org — used by Settings -> Team, ADMIN
+ * only (enforced by the caller route, not here). The ADMIN sets the initial
+ * password directly (there's no outbound-invite-email flow yet); the
+ * teammate can be told to change it after first login. */
+export async function createTeamMember(
+  orgId: string,
+  input: { name: string; email: string; password: string; role: TeamRole }
+): Promise<TeamMember> {
+  const bcrypt = (await import("bcryptjs")).default;
+  const existing = await db.prepare("SELECT id FROM users WHERE email = ?").get(input.email.trim().toLowerCase());
+  if (existing) throw new EmailAlreadyExistsError("An account with this email already exists.");
+  const userId = newId();
+  const createdAt = new Date().toISOString();
+  const passwordHash = bcrypt.hashSync(input.password, 10);
+  await db
+    .prepare("INSERT INTO users (id, org_id, name, email, password_hash, role, created_at) VALUES (?,?,?,?,?,?,?)")
+    .run(userId, orgId, input.name.trim(), input.email.trim().toLowerCase(), passwordHash, input.role, createdAt);
+  return { id: userId, name: input.name.trim(), email: input.email.trim().toLowerCase(), role: input.role, createdAt, deactivatedAt: null };
+}
+
+export async function updateTeamMemberRole(orgId: string, userId: string, role: TeamRole): Promise<void> {
+  await db.prepare("UPDATE users SET role = ? WHERE org_id = ? AND id = ?").run(role, orgId, userId);
+}
+
+/** Blocks a teammate's login without touching their past contacts/deals/
+ * tasks (deleting the user row outright would either orphan or cascade-wipe
+ * everything they ever owned, via the owner_id foreign key — this avoids
+ * that entirely, like disabling a departed employee's badge rather than
+ * shredding their old paperwork). An ADMIN still sees everything regardless
+ * of who owns it, so nothing disappears from the org's pipeline. */
+export async function deactivateTeamMember(orgId: string, userId: string): Promise<void> {
+  await db.prepare("UPDATE users SET deactivated_at = ? WHERE org_id = ? AND id = ?").run(new Date().toISOString(), orgId, userId);
+}
+
+export async function reactivateTeamMember(orgId: string, userId: string): Promise<void> {
+  await db.prepare("UPDATE users SET deactivated_at = NULL WHERE org_id = ? AND id = ?").run(orgId, userId);
 }
 
 /** `incomplete` is a new-signup org that hasn't finished Stripe Checkout yet
@@ -1043,8 +1255,8 @@ export async function findOrgByPendingPaymentIntent(paymentIntentId: string): Pr
 }
 
 /** Alerts: open deals gone quiet, sorted by urgency desc. */
-export async function listAlerts(orgId: string) {
-  const deals = await listDeals(orgId);
+export async function listAlerts(orgId: string, viewerOwnerId?: string) {
+  const deals = await listDeals(orgId, viewerOwnerId);
   return deals
     .filter((d) => !d.stage.startsWith("closed"))
     .map((d) => ({ deal: d, score: urgencyScore(d) }))
@@ -1351,8 +1563,12 @@ export async function grantManualPlan(orgId: string, interval: BillingIntervalId
     .run(interval, interval, newEnd, orgId);
 }
 
-export async function dashboardStats(orgId: string) {
-  const deals = await listDeals(orgId);
+/** `viewerOwnerId`: a SALES teammate gets their own pipeline numbers only;
+ * an ADMIN (or an org with no teammates added yet) gets the whole org's,
+ * same as before this parameter existed. Custom alerts stay team-wide (they
+ * have no owner_id — they're shared reminders, not assigned to one person). */
+export async function dashboardStats(orgId: string, viewerOwnerId?: string) {
+  const deals = await listDeals(orgId, viewerOwnerId);
   const open = deals.filter((d) => !d.stage.startsWith("closed"));
   const won = deals.filter((d) => d.stage === "closed_won");
   const lost = deals.filter((d) => d.stage === "closed_lost");
@@ -1361,7 +1577,7 @@ export async function dashboardStats(orgId: string) {
   const conversionRate = deals.length > 0 ? Math.round((won.length / (won.length + lost.length || 1)) * 100) : 0;
   const openAlerts = await listCustomAlerts(orgId, { onlyOpen: true });
   const dueCustomAlerts = openAlerts.filter((a) => new Date(a.remindAt).getTime() <= Date.now());
-  const dealsAtRisk = (await listAlerts(orgId)).slice(0, 5);
+  const dealsAtRisk = (await listAlerts(orgId, viewerOwnerId)).slice(0, 5);
   return {
     pipelineValue,
     wonValue,

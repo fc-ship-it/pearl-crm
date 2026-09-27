@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { db, id, now } from "@/lib/db";
 import { generateVerbale } from "@/lib/verbale";
 import { getValidGoogleAccessToken, createCalendarEvent } from "@/lib/google";
+import { getValidOutlookAccessToken, createOutlookCalendarEvent } from "@/lib/outlook";
 
 export const runtime = "nodejs";
 
@@ -40,9 +41,14 @@ export async function POST(req: NextRequest) {
     );
 
   // Next steps automatically become linked tasks, per spec. If Google
-  // Calendar is connected, each dated one also becomes a real calendar event
-  // — that's the concrete payoff of connecting Calendar in Settings.
-  const googleAccessToken = await getValidGoogleAccessToken(session.orgId).catch(() => null);
+  // Calendar and/or Outlook Calendar is connected, each dated one also
+  // becomes a real calendar event on every connected calendar — that's the
+  // concrete payoff of connecting Calendar in Settings. Unlike email (where
+  // sending twice would duplicate a message to a contact), creating the same
+  // event on both calendars is harmless and is what someone who deliberately
+  // connected both mailboxes would expect.
+  const googleAccessToken = await getValidGoogleAccessToken(session.orgId, session.userId).catch(() => null);
+  const outlookAccessToken = await getValidOutlookAccessToken(session.orgId, session.userId).catch(() => null);
   for (const step of summary.nextSteps) {
     await db
       .prepare(
@@ -50,17 +56,25 @@ export async function POST(req: NextRequest) {
       )
       .run(id(), session.orgId, body.contactId, body.dealId || null, step.action, step.dueDate, 0, "medium", session.userId, now());
 
-    if (googleAccessToken && step.dueDate) {
+    if (step.dueDate && (googleAccessToken || outlookAccessToken)) {
       const start = new Date(step.dueDate);
       const end = new Date(start.getTime() + 30 * 60 * 1000);
-      await createCalendarEvent(googleAccessToken, {
+      const eventPayload = {
         summary: step.action,
         description: `Follow-up from meeting "${body.title}" with ${contact?.name || "contact"} — created automatically by Pearl.`,
         startISO: start.toISOString(),
         endISO: end.toISOString(),
-      }).catch(() => {
-        // Best-effort: a failed calendar sync never blocks saving the task.
-      });
+      };
+      if (googleAccessToken) {
+        await createCalendarEvent(googleAccessToken, eventPayload).catch(() => {
+          // Best-effort: a failed calendar sync never blocks saving the task.
+        });
+      }
+      if (outlookAccessToken) {
+        await createOutlookCalendarEvent(outlookAccessToken, eventPayload).catch(() => {
+          // Best-effort: a failed calendar sync never blocks saving the task.
+        });
+      }
     }
   }
 

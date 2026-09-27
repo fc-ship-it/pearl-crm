@@ -23,6 +23,7 @@ Open `http://localhost:3000`. On first run the database creates its schema and s
 |---|---|
 | Authentication (signup/login, signed-cookie session) | **Real** |
 | Multi-tenant (each company is isolated) | **Real** |
+| Team members (Settings → Team: add teammates, Admin sees everyone, Sales sees only their own) | **Real**, enforced at the database query level — see "Team members" below |
 | Drag&drop pipeline, stage persistence | **Real**, saved to the database |
 | "Reactivate today" alerts (time × value × stage) | **Real**, computed from the data |
 | Tasks and checklist | **Real** |
@@ -30,9 +31,9 @@ Open `http://localhost:3000`. On first run the database creates its schema and s
 | Lead qualification (interest, budget tier, target segment) | **Real**, saved to the database and used for filtering/campaign targeting |
 | QR code scanning (live camera + image upload) | **Real decoding** (vCard and WhatsApp "click to chat" links), via the client-side `jsQR` library |
 | Contact import from Android/Apple (.vcf / vCard export) | **Real parsing**, hand-written vCard 2.1/3.0 parser, no contacts API access needed |
-| Campaigns (segmented promotions) | **Real targeting/audience matching**; **real send** once Gmail/WhatsApp is connected, falls back to simulated otherwise (see below) |
+| Campaigns (segmented promotions) | **Real targeting/audience matching**; **real send** once Gmail, Outlook Mail, and/or WhatsApp is connected, falls back to simulated otherwise (see below) |
 | Custom alerts / reminders | **Real**, saved to the database, surfaced on the dashboard when due |
-| Gmail / Google Calendar / WhatsApp integrations | **Real** — genuine OAuth (Google) and Cloud API (WhatsApp) once you complete the one-time setup in "Connecting real integrations" below |
+| Gmail / Google Calendar / Outlook Mail / Outlook Calendar / WhatsApp integrations | **Real** — genuine OAuth (Google, Microsoft) and Cloud API (WhatsApp) once you complete the one-time setup in "Connecting real integrations" below. Gmail and Outlook can both be connected at once, and each is **per-teammate** (see "Team members" below) — WhatsApp is the one shared, org-wide connection. |
 | Plans and billing | **Real** — Ziina payment intents in AED (weekly/monthly/annual), with automatic renewal-link emails and an access gate on non-payment. See `ZIINA_INTEGRATION.md` for setup and design notes. |
 
 ### Contact capture: QR codes, device import, manual entry
@@ -47,7 +48,7 @@ Every contact keeps a `source` badge (added manually / scanned QR code / WhatsAp
 
 ### Campaigns & custom alerts
 
-**Campaigns & alerts** in the sidebar lets you draft a targeted WhatsApp or email promotion, matched live against contacts by interest / budget tier / target segment (leave all three blank to match everyone). Saving creates a draft; "Send now" sends a **real** email (via Gmail) or WhatsApp message to every matched contact that has an email/phone, once that integration is connected in Settings — contacts missing the needed field, or an integration that isn't connected, are reported back as "skipped" rather than silently failing. With nothing connected it behaves exactly as before: a simulated send, with a real audience match, recipient count, and per-contact activity-log entry ("Campaign sent: …"). **Custom alerts** are simple dated reminders that show up as a banner on the dashboard once they're due, alongside the automatic "reactivate today" alerts.
+**Campaigns & alerts** in the sidebar lets you draft a targeted WhatsApp or email promotion, matched live against contacts by interest / budget tier / target segment (leave all three blank to match everyone). Saving creates a draft; "Send now" sends a **real** email (via Gmail, or via Outlook Mail if Gmail isn't connected) or WhatsApp message to every matched contact that has an email/phone, once that integration is connected in Settings — contacts missing the needed field, or an integration that isn't connected, are reported back as "skipped" rather than silently failing. If both Gmail and Outlook Mail are connected, Gmail is used for sending (so there's one predictable "from" mailbox rather than picking one at random per contact); either one alone is enough. With nothing connected it behaves exactly as before: a simulated send, with a real audience match, recipient count, and per-contact activity-log entry ("Campaign sent: …"). **Custom alerts** are simple dated reminders that show up as a banner on the dashboard once they're due, alongside the automatic "reactivate today" alerts.
 
 ### Why the meeting minutes don't call a real AI model
 
@@ -58,9 +59,9 @@ Every contact keeps a `source` badge (added manually / scanned QR code / WhatsAp
 
 The whole interface ("New meeting" page, minutes view, automatic tasks) stays identical: only the function that generates the content changes.
 
-## Connecting real integrations (Google + WhatsApp)
+## Connecting real integrations (Google + Outlook + WhatsApp)
 
-Settings → Integrations has three cards. Gmail and Google Calendar connect through a real Google OAuth flow (one login covers both, since it's the same Google account); WhatsApp Business connects by pasting credentials from Meta's own dashboard, the same pattern most CRMs use before building the heavier "Embedded Signup" flow. Nothing here is faked — but each needs a one-time setup that only you (AHEAD LLC) can do, because it requires creating accounts/approvals with Google and Meta.
+Settings → Integrations has five cards. Gmail and Google Calendar connect through a real Google OAuth flow (one login covers both, since it's the same Google account); Outlook Mail and Outlook Calendar connect the same way through a real Microsoft OAuth flow (one Microsoft/Microsoft 365 login covers both); WhatsApp Business connects by pasting credentials from Meta's own dashboard, the same pattern most CRMs use before building the heavier "Embedded Signup" flow. Nothing here is faked — but the Google/Microsoft ones need a one-time **developer** setup that only you (AHEAD LLC) can do, because it requires creating an app registration with Google/Microsoft (see below); once that's done, it's a one-click "Connect" for every customer, forever after. Google and Outlook are entirely independent: an account can connect one, the other, or both at the same time (e.g. a Gmail inbox and an Outlook inbox connected together). And **each is personal**: if an organization has added teammates (see "Team members" below), every teammate connects their own Gmail/Outlook here, independently of everyone else's — WhatsApp Business is the only one of the five that's shared across the whole team.
 
 ### Google Calendar + Gmail
 
@@ -72,7 +73,20 @@ What it unlocks once connected: "Send now" on an email campaign actually emails 
 4. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**, type "Web application". Under "Authorized redirect URIs" add exactly: `https://<your-live-domain>/api/integrations/google/callback` (e.g. `https://pearl-crm.netlify.app/api/integrations/google/callback` — must match your real deployed URL exactly, including `https://`).
 5. Copy the **Client ID** and **Client secret** it gives you.
 6. Add two environment variables on Netlify/Vercel: `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then redeploy.
-7. In Pearl, go to Settings → Integrations → Gmail (or Google Calendar) → "Connect with Google", sign in, approve — both cards show "Connected" together.
+7. In Pearl, go to Settings → Integrations → Gmail (or Google Calendar) → "Connect", sign in, approve — both cards show "Connected" together.
+
+### Outlook Mail + Outlook Calendar
+
+What it unlocks once connected: "Send now" on an email campaign actually emails every matched contact from your Outlook/Microsoft 365 account (used automatically when Gmail isn't connected), and every dated follow-up task created from AI meeting minutes also becomes a real event on your Outlook Calendar.
+
+1. Go to the [Azure Portal](https://portal.azure.com/) and sign in with the Microsoft account you'll use to administer this (a free Microsoft account is enough to register an app — it doesn't need to be the same account any customer later connects).
+2. Go to **Microsoft Entra ID → App registrations → New registration**. Name it anything (e.g. "Pearl CRM"). Under "Supported account types" choose **"Accounts in any organizational directory and personal Microsoft accounts"** — this is what lets any customer connect their own Gmail-style personal Outlook.com account *or* their company's Microsoft 365 account.
+3. Under **Redirect URI**, pick platform "Web" and add exactly: `https://<your-live-domain>/api/integrations/outlook/callback` (e.g. `https://pearl-crm.netlify.app/api/integrations/outlook/callback` — must match your real deployed URL exactly, including `https://`).
+4. After creating the registration, copy the **Application (client) ID** shown on the Overview page.
+5. Go to **Certificates & secrets → New client secret**, create one, and copy its **Value** immediately (like Stripe/Google, Azure only shows it once).
+6. Go to **API permissions → Add a permission → Microsoft Graph → Delegated permissions**, and add `Mail.Send`, `Calendars.ReadWrite`, `User.Read`, and `offline_access` (the last one is what allows Pearl to silently keep the connection alive without asking the customer to sign in again every hour).
+7. Add two environment variables on Netlify/Vercel: `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET`, then redeploy.
+8. In Pearl, go to Settings → Integrations → Outlook Mail (or Outlook Calendar) → "Connect", sign in, approve — both cards show "Connected" together. This works alongside Gmail/Google Calendar being connected too, on the same account.
 
 ### WhatsApp Business
 
@@ -82,6 +96,24 @@ What it unlocks once connected: "Send now" on a WhatsApp campaign actually messa
 2. Once approved, in the Meta for Developers dashboard for your app, go to **WhatsApp → API Setup**. There you'll find a **temporary access token** (or generate a permanent one under System Users, recommended for production) and a **Phone Number ID**.
 3. In Pearl, go to Settings → Integrations → WhatsApp Business → "Connect", paste the access token and Phone Number ID, and submit — Pearl calls Meta's API right away to confirm they work before marking it connected.
 4. **Important limitation to know about**: Meta only allows free-form text messages within 24 hours of the customer's last message to you (the "customer service window"). Outside that window, only a pre-approved message **template** can be sent. Pearl's campaign send uses free-form text — great for following up an active conversation, not guaranteed for cold outbound to a whole segment. Template support can be added later if you need it for broader campaigns.
+
+## Team members (Settings → Team)
+
+An organization starts with one login — the person who signed up, role `ADMIN`. From **Settings → Team** (visible to admins only), that person can add teammates: a name, email, and an initial password they share directly (there's no outbound invite-email flow yet — the teammate just logs in with what they were given). Each teammate gets:
+
+- Their **own login** under the same organization/subscription — not a separate signup, not separate billing.
+- A role: `ADMIN` (sees the whole team's contacts, deals, dashboard and statistics — same as the org's original owner) or `SALES` (sees **only** the contacts and deals assigned to them, everywhere in the app: dashboard numbers, the pipeline board, the contacts list, statistics). This is enforced at the database query level (every list/read function takes the viewer's id and adds `AND owner_id = ?` for a non-admin), not just hidden in the UI — a `SALES` teammate can't reach another teammate's contact or deal even by guessing its URL.
+- Their **own Gmail/Outlook connection**, independent of every other teammate's — see the next section. WhatsApp Business stays one shared company number for the whole team (that's how WhatsApp Business numbers work in real life).
+
+Removing a teammate ("Deactivate" in Settings → Team) blocks their login immediately but keeps their name on the contacts/deals/tasks they worked on — nothing is deleted or reassigned, exactly like keeping an ex-employee's name on old paperwork. An admin always sees that history regardless of who's still active.
+
+**A note on what this means for selling Pearl to teams:** don't promise a prospect "each of your salespeople gets their own dashboard" as a future/roadmap item — it's built and live today, the moment you add them from Settings → Team. Conversely, don't promise anything this section doesn't cover (e.g. custom permission levels beyond Admin/Sales, or per-teammate billing) until it's actually built.
+
+## Data storage & isolation between customers
+
+Everything lives in one Postgres database (see "Database (Postgres via Neon)" below) — there is no separate database per customer. What keeps one organization's data from ever being visible to another is that **every single table row carries an `org_id`, and every query in the app filters by it** (`WHERE org_id = ?`, on every read and every write, with no exceptions) — this is checked at the database-query level in `src/lib/data.ts`, not just hidden by the UI. A new signup gets a fresh, empty `org_id`; nothing from the demo account or any other customer is ever attached to it. Team members (above) narrow this further within one organization — a `SALES` teammate's queries add `AND owner_id = ?` on top of the org filter, so they see even less than their own admin does.
+
+If a prospect asks specifically about data residency or hosting: the database is hosted on Neon (Postgres), and the app itself on Netlify — both are the infrastructure providers, not AHEAD LLC's own servers. If that specific detail (e.g. which country the database physically lives in) ever matters to a customer's compliance requirements, that's a question for Neon's own documentation/support, not something this codebase controls.
 
 ## Push notifications ("never forget a follow-up")
 

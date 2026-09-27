@@ -18,6 +18,7 @@ type UserRow = {
   email: string;
   password_hash: string;
   role: string;
+  deactivated_at: string | null;
 };
 
 export async function POST(req: NextRequest) {
@@ -31,6 +32,12 @@ export async function POST(req: NextRequest) {
   const user = (await db.prepare("SELECT * FROM users WHERE email = ?").get(email)) as UserRow | undefined;
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return NextResponse.json({ error: "Invalid credentials." }, { status: 401 });
+  }
+  // A teammate removed from Settings -> Team keeps their user row (so their
+  // past contacts/deals/tasks stay attributed correctly) but can no longer
+  // sign back in.
+  if (user.deactivated_at) {
+    return NextResponse.json({ error: "This account has been deactivated." }, { status: 403 });
   }
 
   const token = await createSessionToken({

@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const trialDaysLeft = Math.ceil((new Date(org.trial_ends_at).getTime() - Date.now()) / (24 * 3600 * 1000));
 
   return (
-    <AppShell userName={session.name} orgName={org.name} trialDaysLeft={trialDaysLeft} plan={org.plan}>
+    <AppShell userName={session.name} orgName={org.name} trialDaysLeft={trialDaysLeft} plan={org.plan} isAdmin={session.role === "ADMIN"}>
       {children}
     </AppShell>
   );

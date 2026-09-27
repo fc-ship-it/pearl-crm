@@ -42,6 +42,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "No contact ids provided." }, { status: 400 });
   }
 
-  const deleted = await deleteContacts(session.orgId, ids);
+  const viewerOwnerId = session.role === "ADMIN" ? undefined : session.userId;
+  const deleted = await deleteContacts(session.orgId, ids, viewerOwnerId);
   return NextResponse.json({ ok: true, deleted });
 }
