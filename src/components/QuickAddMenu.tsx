@@ -70,9 +70,13 @@ export default function QuickAddMenu() {
       </button>
 
       {open && (
+        // Full-width sheet under the header on phones (a 320px panel anchored
+        // to a 32px button runs off the left edge of a narrow screen — this
+        // is what "not optimized for mobile" was catching); the same
+        // right-anchored 320px dropdown as before from `md:` up.
         <div
-          className="absolute right-0 top-11 z-50 rounded-xl overflow-hidden"
-          style={{ width: 320, background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "0 8px 24px rgba(21,27,46,0.18)" }}
+          className="fixed left-3 right-3 top-16 md:absolute md:left-auto md:right-0 md:top-11 md:w-[320px] max-h-[80vh] overflow-y-auto z-50 rounded-xl"
+          style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "0 8px 24px rgba(21,27,46,0.18)" }}
         >
           <div className="flex items-center justify-between px-3 pt-3">
             <div className="flex gap-1 flex-wrap">
@@ -116,7 +120,7 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium"
+      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold"
       style={active ? { background: "var(--panel-2)", color: "var(--ink)" } : { color: "var(--ink-dim)" }}
     >
       {icon} {label}
@@ -127,13 +131,13 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
 function RedirectPane({ text, href, cta, onNavigate }: { text: string; href: string; cta: string; onNavigate: () => void }) {
   return (
     <div>
-      <p className="text-xs mb-3" style={{ color: "var(--ink-dim)" }}>
+      <p className="text-sm font-medium mb-3" style={{ color: "var(--ink)" }}>
         {text}
       </p>
       <Link
         href={href}
         onClick={onNavigate}
-        className="block text-center w-full py-2 rounded-lg text-xs font-medium"
+        className="block text-center w-full py-2.5 rounded-lg text-sm font-bold"
         style={{ background: "var(--gold)", color: "var(--ink)" }}
       >
         {cta}
@@ -142,7 +146,12 @@ function RedirectPane({ text, href, cta, onNavigate }: { text: string; href: str
   );
 }
 
-const inputStyle = { background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" } as const;
+// Bolder text + a darker border than the rest of the app's inputs — this
+// compact panel was hard to read on a phone (light placeholder gray on a
+// light field), so contrast here is deliberately turned up rather than
+// reusing the standard (lighter) form-field look.
+const inputStyle = { background: "var(--panel-2)", border: "1.5px solid var(--ink-dim)", color: "var(--ink)", fontWeight: 600 } as const;
+const fieldClass = "w-full px-2.5 py-2 rounded-lg text-sm outline-none placeholder:text-[var(--ink-dim)] placeholder:font-medium";
 
 function QuickDealForm({
   contacts,
@@ -188,7 +197,7 @@ function QuickDealForm({
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Deal title *"
-        className="w-full px-2 py-1.5 rounded-lg text-xs outline-none"
+        className={fieldClass}
         style={inputStyle}
       />
       <div className="grid grid-cols-2 gap-2">
@@ -197,10 +206,10 @@ function QuickDealForm({
           onChange={(e) => setValue(e.target.value)}
           placeholder="Value (AED)"
           inputMode="numeric"
-          className="w-full px-2 py-1.5 rounded-lg text-xs outline-none"
+          className={fieldClass}
           style={inputStyle}
         />
-        <select value={stage} onChange={(e) => setStage(e.target.value)} className="w-full px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle}>
+        <select value={stage} onChange={(e) => setStage(e.target.value)} className={fieldClass} style={inputStyle}>
           {OPEN_STAGE_OPTIONS.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label}
@@ -208,7 +217,7 @@ function QuickDealForm({
           ))}
         </select>
       </div>
-      <select value={contactId} onChange={(e) => setContactId(e.target.value)} className="w-full px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle}>
+      <select value={contactId} onChange={(e) => setContactId(e.target.value)} className={fieldClass} style={inputStyle}>
         <option value="">No contact linked</option>
         {(contacts || []).map((c) => (
           <option key={c.id} value={c.id}>
@@ -217,11 +226,11 @@ function QuickDealForm({
         ))}
       </select>
       {error && (
-        <p className="text-[11px]" style={{ color: "var(--danger)" }}>
+        <p className="text-xs font-semibold" style={{ color: "var(--danger)" }}>
           {error}
         </p>
       )}
-      <button type="submit" disabled={saving} className="w-full py-1.5 rounded-lg text-xs font-medium disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
+      <button type="submit" disabled={saving} className="w-full py-2.5 rounded-lg text-sm font-bold disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
         {saving ? "Saving…" : "Add deal"}
       </button>
     </form>
@@ -280,18 +289,18 @@ function QuickTaskForm({
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Task title *"
-        className="w-full px-2 py-1.5 rounded-lg text-xs outline-none"
+        className={fieldClass}
         style={inputStyle}
       />
       <div className="grid grid-cols-2 gap-2">
-        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
-        <select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle}>
+        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={fieldClass} style={inputStyle} />
+        <select value={priority} onChange={(e) => setPriority(e.target.value)} className={fieldClass} style={inputStyle}>
           <option value="low">Low priority</option>
           <option value="medium">Medium priority</option>
           <option value="high">High priority</option>
         </select>
       </div>
-      <select value={contactId} onChange={(e) => setContactId(e.target.value)} className="w-full px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle}>
+      <select value={contactId} onChange={(e) => setContactId(e.target.value)} className={fieldClass} style={inputStyle}>
         <option value="">No contact linked</option>
         {(contacts || []).map((c) => (
           <option key={c.id} value={c.id}>
@@ -299,7 +308,7 @@ function QuickTaskForm({
           </option>
         ))}
       </select>
-      <select value={dealId} onChange={(e) => setDealId(e.target.value)} className="w-full px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle}>
+      <select value={dealId} onChange={(e) => setDealId(e.target.value)} className={fieldClass} style={inputStyle}>
         <option value="">No deal linked</option>
         {(deals || []).map((d) => (
           <option key={d.id} value={d.id}>
@@ -309,11 +318,11 @@ function QuickTaskForm({
         ))}
       </select>
       {error && (
-        <p className="text-[11px]" style={{ color: "var(--danger)" }}>
+        <p className="text-xs font-semibold" style={{ color: "var(--danger)" }}>
           {error}
         </p>
       )}
-      <button type="submit" disabled={saving} className="w-full py-1.5 rounded-lg text-xs font-medium disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
+      <button type="submit" disabled={saving} className="w-full py-2.5 rounded-lg text-sm font-bold disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>
         {saving ? "Saving…" : "Add task"}
       </button>
     </form>
