@@ -43,6 +43,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=Plus+Jakarta+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap"
           rel="stylesheet"
         />
+        {/* Applies the saved light/dark choice to <html> before first paint —
+            without this, the page would render in light mode for an instant
+            and then flip to dark once React hydrates ThemeToggle. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('pearl.theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}",
+          }}
+        />
       </head>
       <body>{children}</body>
     </html>

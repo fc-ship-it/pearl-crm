@@ -20,13 +20,17 @@ import {
   ChevronsLeft,
   ChevronsRight,
   UserPlus,
+  MapPinned,
 } from "lucide-react";
 import ReminderNotifier from "@/components/ReminderNotifier";
+import QuickAddMenu from "@/components/QuickAddMenu";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV = [
   { href: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/app/pipeline", label: "Pipeline", icon: Kanban },
   { href: "/app/contacts", label: "Contacts", icon: Users },
+  { href: "/app/plan-week", label: "Plan my week", icon: MapPinned },
   { href: "/app/meetings", label: "AI Meetings", icon: Video },
   { href: "/app/campaigns", label: "Campaigns & alerts", icon: Megaphone },
   { href: "/app/statistics", label: "Statistics", icon: BarChart3 },
@@ -229,6 +233,8 @@ export default function AppShell({
               </div>
             </div>
             <div className="flex items-center gap-3 md:gap-4 shrink-0">
+              <ThemeToggle />
+              <QuickAddMenu />
               <ReminderNotifier />
               <div className="flex items-center gap-2">
                 <div

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { db, id as newId } from "@/lib/db";
-import { urgencyScore, BILLING_PLANS, BILLING_GRACE_DAYS, type BillingIntervalId } from "@/lib/domain";
+import { urgencyScore, urgencyLevel, addressArea, WEEKDAY_LABELS, stageConfig, BILLING_PLANS, BILLING_GRACE_DAYS, type BillingIntervalId } from "@/lib/domain";
 
 // NOTE: every exported function here is `async` now. Under the old
 // node:sqlite driver these were synchronous — but a real network database
@@ -23,6 +23,7 @@ export type Deal = {
   createdAt: string;
   contactName?: string;
   companyName?: string;
+  contactAddress?: string | null;
 };
 
 export type Contact = {
@@ -44,6 +45,9 @@ export type Contact = {
   dealValue?: number;
   lastInteractionAt?: string | null;
   temperature: "hot" | "warm" | "cold" | null;
+  /** Free-text street address — no geocoding. Powers the "Open in Google
+   * Maps" link and the "Plan my week" proximity grouping. */
+  address: string | null;
 };
 
 export const LEAD_TEMPERATURES = ["hot", "warm", "cold"] as const;
@@ -157,6 +161,7 @@ function toDeal(r: any): Deal {
     createdAt: r.created_at,
     contactName: r.contact_name ?? undefined,
     companyName: r.company_name ?? undefined,
+    contactAddress: r.contact_address ?? null,
   };
 }
 
@@ -175,7 +180,7 @@ export async function listDeals(orgId: string, viewerOwnerId?: string): Promise<
   }
   const rows = await db
     .prepare(
-      `SELECT d.*, c.name as contact_name, co.name as company_name
+      `SELECT d.*, c.name as contact_name, c.address as contact_address, co.name as company_name
        FROM deals d
        LEFT JOIN contacts c ON c.id = d.contact_id
        LEFT JOIN companies co ON co.id = d.company_id
@@ -197,7 +202,7 @@ export async function getDeal(orgId: string, dealId: string, viewerOwnerId?: str
   }
   const r = await db
     .prepare(
-      `SELECT d.*, c.name as contact_name, co.name as company_name
+      `SELECT d.*, c.name as contact_name, c.address as contact_address, co.name as company_name
        FROM deals d
        LEFT JOIN contacts c ON c.id = d.contact_id
        LEFT JOIN companies co ON co.id = d.company_id
@@ -205,6 +210,68 @@ export async function getDeal(orgId: string, dealId: string, viewerOwnerId?: str
     )
     .get(...params);
   return r ? toDeal(r) : null;
+}
+
+export type NewDealInput = {
+  title: string;
+  value: number;
+  contactId?: string | null;
+  stage?: string;
+  ownerId?: string | null;
+  expectedCloseDate?: string | null;
+};
+
+/** Rough default probability by stage, used only when a deal is created
+ * without picking one by hand — same shape as the demo seed data uses
+ * (closed_won/closed_lost are fixed; everything else scales with the
+ * stage's urgency weight from domain.ts). */
+function defaultProbability(stage: string): number {
+  if (stage === "closed_won") return 100;
+  if (stage === "closed_lost") return 0;
+  return Math.round(stageConfig(stage).weight * 40);
+}
+
+/**
+ * Creates a deal from scratch — the one path that was missing: until this,
+ * every deal in the app came from the demo seed data, with no way for a
+ * real customer to add their own. Optionally attached to an existing
+ * contact (inherits that contact's company); `ownerId` should be set for a
+ * "SALES" teammate creating their own deal so it shows up in their scoped
+ * pipeline right away.
+ */
+export async function createDeal(orgId: string, input: NewDealInput): Promise<Deal> {
+  const dealId = newId();
+  const now = new Date().toISOString();
+  const stage = input.stage || "lead";
+
+  let companyId: string | null = null;
+  if (input.contactId) {
+    const contactRow = (await db.prepare("SELECT company_id FROM contacts WHERE org_id = ? AND id = ?").get(orgId, input.contactId)) as
+      | { company_id: string | null }
+      | undefined;
+    companyId = contactRow?.company_id ?? null;
+  }
+
+  await db
+    .prepare(
+      `INSERT INTO deals (id, org_id, contact_id, company_id, title, value, stage, probability, owner_id, expected_close_date, last_interaction_at, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+    )
+    .run(
+      dealId,
+      orgId,
+      input.contactId || null,
+      companyId,
+      input.title.trim(),
+      input.value,
+      stage,
+      defaultProbability(stage),
+      input.ownerId || null,
+      input.expectedCloseDate || null,
+      now,
+      now
+    );
+  return (await getDeal(orgId, dealId))!;
 }
 
 export async function updateDealStage(orgId: string, dealId: string, stage: string): Promise<void> {
@@ -236,11 +303,18 @@ function toContact(r: any): Contact {
     dealValue: r.deal_value ?? undefined,
     lastInteractionAt: r.last_interaction_at ?? null,
     temperature: (r.temperature as Contact["temperature"]) ?? null,
+    address: r.address ?? null,
   };
 }
 
 export async function setContactTemperature(orgId: string, contactId: string, temperature: LeadTemperature | null): Promise<void> {
   await db.prepare("UPDATE contacts SET temperature = ? WHERE org_id = ? AND id = ?").run(temperature, orgId, contactId);
+}
+
+/** Free-text street address — shown on the contact + used for the Google
+ * Maps link and "Plan my week" proximity grouping. Pass "" or null to clear. */
+export async function setContactAddress(orgId: string, contactId: string, address: string | null): Promise<void> {
+  await db.prepare("UPDATE contacts SET address = ? WHERE org_id = ? AND id = ?").run(address?.trim() || null, orgId, contactId);
 }
 
 /**
@@ -383,6 +457,7 @@ export type NewContactInput = {
   targetSegment?: string | null;
   source?: string;
   ownerId?: string | null;
+  address?: string | null;
 };
 
 export async function createContact(orgId: string, input: NewContactInput): Promise<Contact> {
@@ -391,8 +466,8 @@ export async function createContact(orgId: string, input: NewContactInput): Prom
   const createdAt = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO contacts (id, org_id, company_id, name, email, phone, tags, interest, budget_tier, target_segment, source, owner_id, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO contacts (id, org_id, company_id, name, email, phone, tags, interest, budget_tier, target_segment, source, owner_id, created_at, address)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .run(
       cid,
@@ -407,7 +482,8 @@ export async function createContact(orgId: string, input: NewContactInput): Prom
       input.targetSegment?.trim() || null,
       input.source || "manual",
       input.ownerId || null,
-      createdAt
+      createdAt,
+      input.address?.trim() || null
     );
   return (await getContact(orgId, cid))!;
 }
@@ -499,6 +575,38 @@ export async function listTasks(orgId: string, opts: { onlyOpen?: boolean; viewe
     )
     .all(...params);
   return rows.map(toTask);
+}
+
+export type NewTaskInput = {
+  title: string;
+  dueDate?: string | null;
+  priority?: "low" | "medium" | "high";
+  contactId?: string | null;
+  dealId?: string | null;
+  ownerId?: string | null;
+};
+
+/** Standalone task creation (the quick-add "+" menu) — separate from the
+ * next-step tasks auto-generated from an AI meeting summary, but the same
+ * `tasks` table and shape, so both show up together everywhere tasks do. */
+export async function createTask(orgId: string, input: NewTaskInput): Promise<TaskRow> {
+  const taskId = newId();
+  const createdAt = new Date().toISOString();
+  await db
+    .prepare(
+      "INSERT INTO tasks (id, org_id, contact_id, deal_id, title, due_date, done, priority, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
+    )
+    .run(taskId, orgId, input.contactId || null, input.dealId || null, input.title.trim(), input.dueDate || null, 0, input.priority || "medium", input.ownerId || null, createdAt);
+  const rows = await db
+    .prepare(
+      `SELECT t.*, c.name as contact_name, d.title as deal_title
+       FROM tasks t
+       LEFT JOIN contacts c ON c.id = t.contact_id
+       LEFT JOIN deals d ON d.id = t.deal_id
+       WHERE t.org_id = ? AND t.id = ?`
+    )
+    .get(orgId, taskId);
+  return toTask(rows);
 }
 
 export async function toggleTask(orgId: string, taskId: string, done: boolean): Promise<void> {
@@ -1312,6 +1420,85 @@ export async function listAlerts(orgId: string, viewerOwnerId?: string) {
     .map((d) => ({ deal: d, score: urgencyScore(d) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score);
+}
+
+export type WeeklyPlanItem = {
+  dealId: string;
+  contactId: string | null;
+  contactName: string;
+  dealTitle: string;
+  value: number;
+  score: number;
+  level: ReturnType<typeof urgencyLevel>;
+  address: string | null;
+  area: string;
+};
+
+export type WeeklyPlanDay = {
+  label: (typeof WEEKDAY_LABELS)[number];
+  areas: string[];
+  items: WeeklyPlanItem[];
+  totalScore: number;
+};
+
+/**
+ * "Plan my week" — suggests which day to visit which contact this week,
+ * combining commercial priority (the same urgencyScore that drives
+ * "Reactivate today") with geographic proximity. There's no paid
+ * routing/geocoding API wired up (see addressArea in domain.ts), so
+ * "proximity" here is a free heuristic: contacts whose stored address
+ * shares the same city/area are grouped and visited on the same day,
+ * never split across days. Days are then filled greedily (always adding
+ * a whole area-group to the day with the least total priority so far),
+ * so the busiest/most urgent areas land early in the week without any
+ * one day being overloaded.
+ *
+ * Deals whose contact has no stored address can't be placed on the map,
+ * so they're returned separately as `unscheduled` — still sorted by
+ * priority, with a nudge to add an address so they join the plan.
+ */
+export async function planWeek(orgId: string, viewerOwnerId?: string): Promise<{ days: WeeklyPlanDay[]; unscheduled: WeeklyPlanItem[] }> {
+  const alerts = await listAlerts(orgId, viewerOwnerId);
+
+  const items: WeeklyPlanItem[] = alerts.map(({ deal, score }) => ({
+    dealId: deal.id,
+    contactId: deal.contactId,
+    contactName: deal.contactName || "Unnamed contact",
+    dealTitle: deal.title,
+    value: deal.value,
+    score,
+    level: urgencyLevel(score),
+    address: deal.contactAddress ?? null,
+    area: addressArea(deal.contactAddress) || "",
+  }));
+
+  const unscheduled = items.filter((it) => !it.area);
+  const placeable = items.filter((it) => it.area);
+
+  // Group by area (case-insensitive), keep each group's total priority.
+  const groups = new Map<string, { area: string; items: WeeklyPlanItem[]; totalScore: number }>();
+  for (const it of placeable) {
+    const key = it.area.toLowerCase();
+    const g = groups.get(key) || { area: it.area, items: [], totalScore: 0 };
+    g.items.push(it);
+    g.totalScore += it.score;
+    groups.set(key, g);
+  }
+  const sortedGroups = [...groups.values()].sort((a, b) => b.totalScore - a.totalScore);
+
+  const days: WeeklyPlanDay[] = WEEKDAY_LABELS.map((label) => ({ label, areas: [], items: [], totalScore: 0 }));
+  for (const group of sortedGroups) {
+    // Greedy bin-packing: always add the next area-group (whole, never
+    // split) to whichever day currently has the least total priority —
+    // this is what lets urgent areas land on Monday while keeping every
+    // day's workload roughly balanced once there are more areas than days.
+    const day = days.reduce((min, d) => (d.totalScore < min.totalScore ? d : min), days[0]);
+    day.items.push(...group.items.sort((a, b) => b.score - a.score));
+    day.totalScore += group.totalScore;
+    day.areas.push(group.area);
+  }
+
+  return { days, unscheduled: unscheduled.sort((a, b) => b.score - a.score) };
 }
 
 function toCampaign(r: any): Campaign {

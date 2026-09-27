@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { setContactTemperature, deleteContact, getContact, LEAD_TEMPERATURES } from "@/lib/data";
+import { setContactTemperature, setContactAddress, deleteContact, getContact, LEAD_TEMPERATURES } from "@/lib/data";
 
 export const runtime = "nodejs";
 
@@ -24,6 +24,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "invalid temperature" }, { status: 400 });
     }
     await setContactTemperature(session.orgId, id, temp);
+  }
+
+  if ("address" in body) {
+    if (body.address !== null && typeof body.address !== "string") {
+      return NextResponse.json({ error: "invalid address" }, { status: 400 });
+    }
+    await setContactAddress(session.orgId, id, body.address);
   }
 
   return NextResponse.json({ ok: true });

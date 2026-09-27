@@ -73,6 +73,55 @@ export const URGENCY_COLORS: Record<ReturnType<typeof urgencyLevel>, string> = {
 };
 
 /**
+ * "Plan my week" proximity proxy — there's no paid geocoding/routing API
+ * wired up, so instead of true distance this groups contacts by the last
+ * comma-separated segment of their stored address (typically the city/area,
+ * e.g. "Sheikh Zayed Rd, Dubai" -> "Dubai"). It's an approximation, not real
+ * geographic distance, but it's free and it's usually right: people who
+ * share a city genuinely are closer to visit back-to-back than people who
+ * don't. Returns null when there's no address to work with at all.
+ */
+export function addressArea(address: string | null | undefined): string | null {
+  const trimmed = (address || "").trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(",").map((p) => p.trim()).filter(Boolean);
+  const area = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+  return area || null;
+}
+
+/** Link to open a free-text address in Google Maps — no API key, no
+ * geocoding, just a search query URL. Works for any address string. */
+export function googleMapsSearchUrl(address: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+export const WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"] as const;
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/**
+ * The next `count` weekdays (Mon-Fri, weekends skipped), starting tomorrow —
+ * used to label "Plan my week"'s five day-slots with real dates rather than
+ * bare weekday names. Each slot defaults to 9am so a scheduled visit has a
+ * sensible time even before the person picks one. No `Intl`, for the same
+ * SSR/hydration-consistency reason as {@link formatDate}.
+ */
+export function upcomingWeekdays(count = 5): { iso: string; dayName: string; dateLabel: string }[] {
+  const out: { iso: string; dayName: string; dateLabel: string }[] = [];
+  const d = new Date();
+  d.setUTCHours(9, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + 1);
+  while (out.length < count) {
+    const day = d.getUTCDay();
+    if (day !== 0 && day !== 6) {
+      out.push({ iso: d.toISOString(), dayName: DAY_NAMES[day], dateLabel: formatDate(d.toISOString()) });
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return out;
+}
+
+/**
  * Deterministic currency formatter — AED, e.g. "AED 8,200".
  *
  * Deliberately NOT `Intl.NumberFormat(...)`: Node's bundled ICU data can
@@ -155,7 +204,14 @@ export function budgetTierConfig(id: string | null | undefined) {
   return BUDGET_TIERS.find((b) => b.id === id) ?? null;
 }
 
-/** Common target-segment suggestions shown as datalist options; free text is also accepted. */
+/**
+ * Common target-segment suggestions shown as datalist options; free text is
+ * also accepted, so this is just a head start, never a closed list. Pearl is
+ * sold to different kinds of businesses, so this keeps the generic B2B
+ * verticals (useful to most customers) and adds the ones a consultant
+ * running several practice lines at once — e.g. safety/RSPP, real estate,
+ * health & wellness — actually needs day to day.
+ */
 export const TARGET_SEGMENT_SUGGESTIONS = [
   "Hospitality",
   "Manufacturing",
@@ -165,6 +221,10 @@ export const TARGET_SEGMENT_SUGGESTIONS = [
   "Government",
   "SMB",
   "Enterprise",
+  "Sicurezza / RSPP",
+  "Real Estate",
+  "Salute e benessere",
+  "Consulenza aziendale",
 ];
 
 /** Where a contact record came from — shown as a small provenance badge on the contact. */

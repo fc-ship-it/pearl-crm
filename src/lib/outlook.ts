@@ -151,7 +151,7 @@ export async function getValidOutlookAccessToken(orgId: string, userId: string):
 
 export async function createOutlookCalendarEvent(
   accessToken: string,
-  event: { summary: string; description?: string; startISO: string; endISO: string; attendeeEmail?: string | null }
+  event: { summary: string; description?: string; startISO: string; endISO: string; attendeeEmail?: string | null; location?: string | null }
 ) {
   const res = await fetch(`${GRAPH_BASE}/me/events`, {
     method: "POST",
@@ -159,6 +159,7 @@ export async function createOutlookCalendarEvent(
     body: JSON.stringify({
       subject: event.summary,
       body: event.description ? { contentType: "text", content: event.description } : undefined,
+      location: event.location ? { displayName: event.location } : undefined,
       start: { dateTime: event.startISO, timeZone: "UTC" },
       end: { dateTime: event.endISO, timeZone: "UTC" },
       attendees: event.attendeeEmail

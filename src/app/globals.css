@@ -24,6 +24,29 @@
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
 
+/* Dark theme — same tokens, black/near-black surfaces. Applied by setting
+ * data-theme="dark" on <html> (see ThemeToggle.tsx + the blocking inline
+ * script in layout.tsx that reads the saved choice before first paint, so
+ * there's no light-mode flash). Every component in the app already reads
+ * colors through these CSS variables rather than hardcoded hex, so this one
+ * block is what makes the whole app (dashboard included) themeable. */
+:root[data-theme="dark"] {
+  --bg: #0b0e14;
+  --panel: #12151f;
+  --panel-2: #1a1e2b;
+  --border: #262b3a;
+  --ink: #f0f2f7;
+  --ink-dim: #97a0b8;
+  --gold: #d9b53c;
+  --gold-soft: #f0dda0;
+  --cyan: #33e0cf;
+  --magenta: #6f8bf0;
+  --violet: #a9b6e8;
+  --success: #22c58c;
+  --warning: #f0a63e;
+  --danger: #f16b70;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-panel: var(--panel);

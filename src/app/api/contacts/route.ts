@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { createContact, deleteContacts } from "@/lib/data";
+import { createContact, deleteContacts, listContacts } from "@/lib/data";
 
 export const runtime = "nodejs";
+
+/** Lightweight lookup used by pickers (the quick-add "+" menu's Deal/Task
+ * forms) — same owner-scoping as everywhere else, just id+name instead of
+ * the full contact record. */
+export async function GET() {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const viewerOwnerId = session.role === "ADMIN" ? undefined : session.userId;
+  const contacts = await listContacts(session.orgId, {}, viewerOwnerId);
+  return NextResponse.json({ contacts: contacts.map((c) => ({ id: c.id, name: c.name })) });
+}
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -23,6 +34,7 @@ export async function POST(req: NextRequest) {
     targetSegment: body.targetSegment || null,
     source: body.source || "manual",
     ownerId: session.userId,
+    address: body.address || null,
   });
 
   return NextResponse.json({ ok: true, contact });

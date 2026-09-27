@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS contacts (
   source TEXT NOT NULL DEFAULT 'manual',
   owner_id TEXT REFERENCES users(id),
   temperature TEXT,
+  address TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -376,6 +377,9 @@ async function initDb(): Promise<void> {
     ["target_segment", "TEXT"],
     ["source", "TEXT NOT NULL DEFAULT 'manual'"],
     ["temperature", "TEXT"],
+    // Street address (free text — no geocoding). Used for the "Open in Google
+    // Maps" link and as the proximity signal ("plan my week" groups by this).
+    ["address", "TEXT"],
   ]);
   await addMissingColumns("custom_alerts", [
     ["kind", "TEXT NOT NULL DEFAULT 'general'"],

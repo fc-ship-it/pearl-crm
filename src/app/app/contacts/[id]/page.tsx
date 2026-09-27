@@ -4,6 +4,7 @@ import { getContact, listActivitiesForContact, listDealsForContact } from "@/lib
 import { formatCurrency, relativeDaysLabel, initials, avatarColor, ACTIVITY_LABELS, stageConfig, urgencyScore, urgencyLevel, URGENCY_COLORS, budgetTierConfig, contactSourceConfig } from "@/lib/domain";
 import { Mail, Phone, MessageCircle, Users as UsersIcon, StickyNote } from "lucide-react";
 import LeadTemperaturePicker from "@/components/LeadTemperaturePicker";
+import ContactAddressEditor from "@/components/ContactAddressEditor";
 import DeleteContactButton from "@/components/DeleteContactButton";
 
 const ICONS: Record<string, any> = { mail: Mail, phone: Phone, "message-circle": MessageCircle, users: UsersIcon, "sticky-note": StickyNote };
@@ -63,6 +64,7 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
           <div className="mt-3">
             <LeadTemperaturePicker contactId={contact.id} value={contact.temperature} />
           </div>
+          <ContactAddressEditor contactId={contact.id} value={contact.address} />
         </div>
       </div>
         <DeleteContactButton contactId={contact.id} contactName={contact.name} redirectTo="/app/contacts" size="md" />

@@ -145,7 +145,7 @@ export async function getValidGoogleAccessToken(orgId: string, userId: string): 
 
 export async function createCalendarEvent(
   accessToken: string,
-  event: { summary: string; description?: string; startISO: string; endISO: string; attendeeEmail?: string | null }
+  event: { summary: string; description?: string; startISO: string; endISO: string; attendeeEmail?: string | null; location?: string | null }
 ) {
   const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
     method: "POST",
@@ -153,6 +153,7 @@ export async function createCalendarEvent(
     body: JSON.stringify({
       summary: event.summary,
       description: event.description,
+      location: event.location || undefined,
       start: { dateTime: event.startISO },
       end: { dateTime: event.endISO },
       attendees: event.attendeeEmail ? [{ email: event.attendeeEmail }] : undefined,

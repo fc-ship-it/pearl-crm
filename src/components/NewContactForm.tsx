@@ -16,13 +16,14 @@ type Draft = {
   email: string;
   phone: string;
   companyName: string;
+  address: string;
   interest: string;
   budgetTier: string;
   targetSegment: string;
   source: string;
 };
 
-const emptyDraft: Draft = { name: "", email: "", phone: "", companyName: "", interest: "", budgetTier: "", targetSegment: "", source: "manual" };
+const emptyDraft: Draft = { name: "", email: "", phone: "", companyName: "", address: "", interest: "", budgetTier: "", targetSegment: "", source: "manual" };
 
 export default function NewContactForm({ companyNames }: { companyNames: string[] }) {
   const [tab, setTab] = useState<Tab>("manual");
@@ -141,6 +142,21 @@ export default function NewContactForm({ companyNames }: { companyNames: string[
               </label>
               <input value={draft.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+971 5x xxx xxxx" className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
             </div>
+          </div>
+          <div>
+            <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
+              Address
+            </label>
+            <input
+              value={draft.address}
+              onChange={(e) => set("address", e.target.value)}
+              placeholder="E.g. Sheikh Zayed Rd, Dubai"
+              className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none"
+              style={inputStyle}
+            />
+            <p className="text-[10px] mt-1" style={{ color: "var(--ink-dim)" }}>
+              Powers the &quot;Open in Google Maps&quot; link and the weekly visit planner — even just a city helps.
+            </p>
           </div>
 
           <div className="pt-2" style={{ borderTop: "1px solid var(--border)" }}>
