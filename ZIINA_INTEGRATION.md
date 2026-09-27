@@ -69,7 +69,7 @@ Add these on Netlify (Site settings → Environment variables), same place as
 |---|---|---|
 | `ZIINA_ACCESS_TOKEN` | Your Ziina API key | Every real charge |
 | `CRON_SECRET` | Any long random string you make up | The daily renewal sweep |
-| `APP_URL` | Already set (`https://pearl-crm.netlify.app`) | Payment redirect URLs |
+| `APP_URL` | Set to your live domain (`https://pearl-crm.com`) | Payment redirect URLs |
 
 ### Getting `ZIINA_ACCESS_TOKEN`
 
@@ -93,7 +93,7 @@ it by just opening this URL once in a browser (reuses `CRON_SECRET` so
 there's no third secret to manage):
 
 ```
-https://pearl-crm.netlify.app/api/billing/register-webhook?token=<your CRON_SECRET>
+https://pearl-crm.com/api/billing/register-webhook?token=<your CRON_SECRET>
 ```
 
 It's safe to open more than once (e.g. after moving to a new domain) — it
@@ -109,7 +109,7 @@ about later — so instead, point a plain external scheduler at it:
 
 - **Easiest**: a free account at [cron-job.org](https://cron-job.org) — add
   a job that does a daily `GET` to
-  `https://pearl-crm.netlify.app/api/billing/cron?token=<your CRON_SECRET>`.
+  `https://pearl-crm.com/api/billing/cron?token=<your CRON_SECRET>`.
 - **Alternative**: a GitHub Actions scheduled workflow in this repo (a
   `schedule: cron:` trigger calling the same URL with `curl`).
 

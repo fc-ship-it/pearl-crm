@@ -8,7 +8,7 @@
 // configured.
 
 export function appUrl(): string {
-  return (process.env.APP_URL || "https://pearl-crm.netlify.app").replace(/\/+$/, "");
+  return (process.env.APP_URL || "https://pearl-crm.com").replace(/\/+$/, "");
 }
 
 // Returns whether the email was actually accepted by Resend — most callers

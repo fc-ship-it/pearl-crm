@@ -28,7 +28,7 @@ export function isGoogleConfigured() {
 // `req.url` doesn't reliably reflect the public custom domain — Google then
 // rejects the request with redirect_uri_mismatch even though the app "looks"
 // right. Instead we pin an explicit APP_URL env var (set on Netlify to
-// https://pearl-crm.netlify.app) and only fall back to the request's own
+// https://pearl-crm.com) and only fall back to the request's own
 // origin for local development, where APP_URL is normally unset.
 export function getAppBaseUrl(requestUrl: string): string {
   const configured = process.env.APP_URL?.trim();

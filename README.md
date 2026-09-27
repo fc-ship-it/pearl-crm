@@ -70,7 +70,7 @@ What it unlocks once connected: "Send now" on an email campaign actually emails 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a new project (any name, e.g. "Pearl CRM").
 2. In that project, go to **APIs & Services → Library** and enable two APIs: **Google Calendar API** and **Gmail API**.
 3. Go to **APIs & Services → OAuth consent screen**. Choose "External", fill in the required fields (app name "Pearl", your email). While the app is in "Testing" status, only Google accounts you explicitly add as "test users" can connect — add your own account and any customer who wants to try it now; for unlimited customers later, Google's verification review is needed (routine, but takes some days — see their docs).
-4. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**, type "Web application". Under "Authorized redirect URIs" add exactly: `https://<your-live-domain>/api/integrations/google/callback` (e.g. `https://pearl-crm.netlify.app/api/integrations/google/callback` — must match your real deployed URL exactly, including `https://`).
+4. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**, type "Web application". Under "Authorized redirect URIs" add exactly: `https://<your-live-domain>/api/integrations/google/callback` (e.g. `https://pearl-crm.com/api/integrations/google/callback` — must match your real deployed URL exactly, including `https://`).
 5. Copy the **Client ID** and **Client secret** it gives you.
 6. Add two environment variables on Netlify/Vercel: `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then redeploy.
 7. In Pearl, go to Settings → Integrations → Gmail (or Google Calendar) → "Connect", sign in, approve — both cards show "Connected" together.
@@ -81,7 +81,7 @@ What it unlocks once connected: "Send now" on an email campaign actually emails 
 
 1. Go to the [Azure Portal](https://portal.azure.com/) and sign in with the Microsoft account you'll use to administer this (a free Microsoft account is enough to register an app — it doesn't need to be the same account any customer later connects).
 2. Go to **Microsoft Entra ID → App registrations → New registration**. Name it anything (e.g. "Pearl CRM"). Under "Supported account types" choose **"Accounts in any organizational directory and personal Microsoft accounts"** — this is what lets any customer connect their own Gmail-style personal Outlook.com account *or* their company's Microsoft 365 account.
-3. Under **Redirect URI**, pick platform "Web" and add exactly: `https://<your-live-domain>/api/integrations/outlook/callback` (e.g. `https://pearl-crm.netlify.app/api/integrations/outlook/callback` — must match your real deployed URL exactly, including `https://`).
+3. Under **Redirect URI**, pick platform "Web" and add exactly: `https://<your-live-domain>/api/integrations/outlook/callback` (e.g. `https://pearl-crm.com/api/integrations/outlook/callback` — must match your real deployed URL exactly, including `https://`).
 4. After creating the registration, copy the **Application (client) ID** shown on the Overview page.
 5. Go to **Certificates & secrets → New client secret**, create one, and copy its **Value** immediately (like Stripe/Google, Azure only shows it once).
 6. Go to **API permissions → Add a permission → Microsoft Graph → Delegated permissions**, and add `Mail.Send`, `Calendars.ReadWrite`, `User.Read`, and `offline_access` (the last one is what allows Pearl to silently keep the connection alive without asking the customer to sign in again every hour).

@@ -44,7 +44,7 @@ export default function TermsPage() {
           Terms &amp; Conditions
         </h1>
         <p className="text-sm mb-10" style={{ color: "var(--ink-dim)" }}>
-          Last updated: {UPDATED} · Applies to the Pearl CRM application at pearl-crm.netlify.app
+          Last updated: {UPDATED} · Applies to the Pearl CRM application at pearl-crm.com
         </p>
 
         <Section title="1. Acceptance of these terms">
