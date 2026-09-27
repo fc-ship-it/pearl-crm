@@ -162,6 +162,30 @@ export async function sendTrialEndedEmail(info: { contactEmail: string; orgName:
   );
 }
 
+// Self-service password reset link. Same best-effort Resend send as every
+// other email here — the caller (the /api/auth/forgot-password route)
+// deliberately doesn't tell the requester whether this actually went out,
+// so that route can't be used to probe which emails have a Pearl account.
+export async function sendPasswordResetEmail(info: { contactEmail: string; contactName: string; rawToken: string }): Promise<boolean> {
+  const url = appUrl();
+  const firstName = info.contactName.trim().split(/\s+/)[0] || info.contactName;
+  return sendEmail(
+    info.contactEmail,
+    "Reset your Pearl password",
+    [
+      `Hi ${firstName},`,
+      ``,
+      `We got a request to reset your Pearl password. Click below to choose a new one — this link works once, and expires in 1 hour:`,
+      ``,
+      `${url}/reset-password?token=${info.rawToken}`,
+      ``,
+      `If you didn't ask for this, you can safely ignore this email — your password hasn't changed.`,
+      ``,
+      `— The Pearl team`,
+    ].join("\n")
+  );
+}
+
 // Sent when Stripe couldn't charge a renewal (card expired, insufficient
 // funds, etc). Stripe itself keeps retrying for a while (Smart Retries)
 // before the subscription is actually canceled, so this just points the

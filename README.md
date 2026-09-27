@@ -109,6 +109,10 @@ Removing a teammate ("Deactivate" in Settings → Team) blocks their login immed
 
 **A note on what this means for selling Pearl to teams:** don't promise a prospect "each of your salespeople gets their own dashboard" as a future/roadmap item — it's built and live today, the moment you add them from Settings → Team. Conversely, don't promise anything this section doesn't cover (e.g. custom permission levels beyond Admin/Sales, or per-teammate billing) until it's actually built.
 
+## Password reset ("Forgot password?")
+
+Self-service, email-based — the login page has a "Forgot password?" link. It goes to `/forgot-password` (enter your email → get a one-time link, valid for 1 hour) and `/reset-password?token=...` (choose a new password). The reset email is sent through the same Resend setup already used for welcome/renewal emails (`RESEND_API_KEY`/`RESEND_FROM_EMAIL` — see below), so it only actually arrives once that's configured; without it, the request still "succeeds" silently (so the endpoint can't be used to check which emails have an account) but no email goes out — check Netlify's function logs for `[notify]` lines if a reset email seems to be missing. The reset token itself is a random value; only its SHA-256 hash is stored, so a database leak alone could never be used to reset anyone's password.
+
 ## Data storage & isolation between customers
 
 Everything lives in one Postgres database (see "Database (Postgres via Neon)" below) — there is no separate database per customer. What keeps one organization's data from ever being visible to another is that **every single table row carries an `org_id`, and every query in the app filters by it** (`WHERE org_id = ?`, on every read and every write, with no exceptions) — this is checked at the database-query level in `src/lib/data.ts`, not just hidden by the UI. A new signup gets a fresh, empty `org_id`; nothing from the demo account or any other customer is ever attached to it. Team members (above) narrow this further within one organization — a `SALES` teammate's queries add `AND owner_id = ?` on top of the org filter, so they see even less than their own admin does.

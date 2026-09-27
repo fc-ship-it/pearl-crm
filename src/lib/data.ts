@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+import bcrypt from "bcryptjs";
 import { db, id as newId } from "@/lib/db";
 import { urgencyScore, BILLING_PLANS, BILLING_GRACE_DAYS, type BillingIntervalId } from "@/lib/domain";
 
@@ -744,7 +746,6 @@ export async function createTeamMember(
   orgId: string,
   input: { name: string; email: string; password: string; role: TeamRole }
 ): Promise<TeamMember> {
-  const bcrypt = (await import("bcryptjs")).default;
   const existing = await db.prepare("SELECT id FROM users WHERE email = ?").get(input.email.trim().toLowerCase());
   if (existing) throw new EmailAlreadyExistsError("An account with this email already exists.");
   const userId = newId();
@@ -772,6 +773,55 @@ export async function deactivateTeamMember(orgId: string, userId: string): Promi
 
 export async function reactivateTeamMember(orgId: string, userId: string): Promise<void> {
   await db.prepare("UPDATE users SET deactivated_at = NULL WHERE org_id = ? AND id = ?").run(orgId, userId);
+}
+
+/* ---------------------------------------------------------------------- *
+ * Password reset — self-service, email-based (see password_reset_tokens in
+ * src/lib/db.ts and sendPasswordResetEmail in src/lib/notify.ts). Used by
+ * /forgot-password and /reset-password, and by the /api/auth/* routes
+ * behind them.
+ * ---------------------------------------------------------------------- */
+
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+function hashResetToken(rawToken: string): string {
+  return crypto.createHash("sha256").update(rawToken).digest("hex");
+}
+
+export async function findUserByEmail(email: string): Promise<{ id: string; name: string; deactivatedAt: string | null } | null> {
+  const r = (await db.prepare("SELECT id, name, deactivated_at FROM users WHERE email = ?").get(email.trim().toLowerCase())) as
+    | { id: string; name: string; deactivated_at: string | null }
+    | undefined;
+  return r ? { id: r.id, name: r.name, deactivatedAt: r.deactivated_at } : null;
+}
+
+/** Generates a fresh reset link's token, stores only its hash (see
+ * hashResetToken), and returns the RAW token — the only place the raw value
+ * ever exists outside the emailed link itself. */
+export async function createPasswordResetToken(userId: string): Promise<string> {
+  const rawToken = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
+  await db
+    .prepare("INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, created_at) VALUES (?,?,?,?,?)")
+    .run(newId(), userId, hashResetToken(rawToken), expiresAt, new Date().toISOString());
+  return rawToken;
+}
+
+/** Validates a raw token from a reset link (unexpired, not already used),
+ * sets the new password, and marks the token consumed so the same link
+ * can't be replayed. Returns false (and changes nothing) if the token is
+ * invalid, expired, or already used. */
+export async function consumePasswordResetToken(rawToken: string, newPassword: string): Promise<boolean> {
+  const tokenHash = hashResetToken(rawToken);
+  const row = (await db
+    .prepare("SELECT id, user_id, expires_at, consumed_at FROM password_reset_tokens WHERE token_hash = ?")
+    .get(tokenHash)) as { id: string; user_id: string; expires_at: string; consumed_at: string | null } | undefined;
+  if (!row || row.consumed_at || new Date(row.expires_at).getTime() < Date.now()) return false;
+
+  const passwordHash = bcrypt.hashSync(newPassword, 10);
+  await db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, row.user_id);
+  await db.prepare("UPDATE password_reset_tokens SET consumed_at = ? WHERE id = ?").run(new Date().toISOString(), row.id);
+  return true;
 }
 
 /** `incomplete` is a new-signup org that hasn't finished Stripe Checkout yet

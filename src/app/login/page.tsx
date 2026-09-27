@@ -54,9 +54,14 @@ function LoginForm() {
             <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
           </div>
           <div>
-            <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
-              Password
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
+                Password
+              </label>
+              <Link href="/forgot-password" className="text-xs" style={{ color: "var(--cyan)" }}>
+                Forgot password?
+              </Link>
+            </div>
             <input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
           </div>
           {error && (

@@ -306,6 +306,22 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at TEXT NOT NULL
 );
 
+-- Password reset links (Settings has no self-service reset yet without
+-- this): token_hash is the SHA-256 of a random token, never the raw token
+-- itself, so a leaked database row can't be used to reset anyone's password
+-- -- only the raw token (which only ever exists in the emailed link) can.
+-- One-time use: consumed_at is set the moment it's redeemed, and a request
+-- for a new link doesn't invalidate an older still-valid one (simplest
+-- behavior; the expiry below is what actually matters day to day).
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  consumed_at TEXT,
+  created_at TEXT NOT NULL
+);
+
 -- Per-USER (not per-org) Gmail/Outlook connections, so each teammate in an
 -- org can connect their own mailbox/calendar independently -- unlike the
 -- org-wide integrations table above (still used for WhatsApp, which is one
