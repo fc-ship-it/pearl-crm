@@ -265,6 +265,35 @@ export function leadTemperatureConfig(id: string | null | undefined) {
   return LEAD_TEMPERATURES.find((t) => t.id === id) ?? null;
 }
 
+/** Every card on the Statistics page, in default order. "kind" decides which
+ * grid it renders in (stat cards in the 4-up row, charts in the 2-up rows)
+ * — the customize panel lets the user toggle/reorder within each kind, kept
+ * separate rather than one fully free-form grid so the layout never breaks. */
+export const STATISTICS_WIDGETS = [
+  { id: "open_pipeline_value", labelKey: "statistics.stat.openPipeline", kind: "stat" },
+  { id: "closed_won_value", labelKey: "statistics.stat.closedWon", kind: "stat" },
+  { id: "total_contacts", labelKey: "statistics.stat.totalContacts", kind: "stat" },
+  { id: "hot_leads", labelKey: "statistics.stat.hotLeads", kind: "stat" },
+  { id: "pipeline_by_stage", labelKey: "statistics.pipelineByStage", kind: "chart" },
+  { id: "lead_temperature", labelKey: "statistics.leadTemperature", kind: "chart" },
+  { id: "contacts_by_source", labelKey: "statistics.contactsBySource", kind: "chart" },
+  { id: "contacts_trend", labelKey: "statistics.newContactsTrend", kind: "chart" },
+] as const;
+export type StatisticsWidgetId = (typeof STATISTICS_WIDGETS)[number]["id"];
+export const DEFAULT_STATISTICS_WIDGET_IDS: StatisticsWidgetId[] = STATISTICS_WIDGETS.map((w) => w.id);
+
+/** A user's saved list IS exactly which widgets show, in that order (like
+ * customizing a phone's home screen — remove one and it stays removed until
+ * you add it back from the customize panel). `null` means "never
+ * customized" and falls back to every widget in its default order; an old
+ * saved list is still filtered against the current registry so a widget
+ * that was since removed from the app can't linger. */
+export function resolveStatisticsWidgets(saved: string[] | null): StatisticsWidgetId[] {
+  if (saved === null) return DEFAULT_STATISTICS_WIDGET_IDS;
+  const known = new Set(DEFAULT_STATISTICS_WIDGET_IDS as string[]);
+  return saved.filter((id): id is StatisticsWidgetId => known.has(id));
+}
+
 export var CAMPAIGN_CHANNELS = [
   { id: "whatsapp", label: "WhatsApp" },
   { id: "email", label: "Email" },

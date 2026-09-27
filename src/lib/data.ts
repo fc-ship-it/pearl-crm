@@ -884,6 +884,32 @@ export async function reactivateTeamMember(orgId: string, userId: string): Promi
 }
 
 /* ---------------------------------------------------------------------- *
+ * Per-user UI preferences — language and which Statistics widgets show.
+ * Deliberately per-user (not per-org): two teammates on the same account
+ * can each pick their own language and their own widget layout.
+ * ---------------------------------------------------------------------- */
+
+export type UserPreferences = { locale: string | null; statisticsWidgets: string[] | null };
+
+export async function getUserPreferences(userId: string): Promise<UserPreferences> {
+  const r = (await db.prepare("SELECT locale, statistics_widgets FROM users WHERE id = ?").get(userId)) as
+    | { locale: string | null; statistics_widgets: string | null }
+    | undefined;
+  return {
+    locale: r?.locale ?? null,
+    statisticsWidgets: r?.statistics_widgets ? JSON.parse(r.statistics_widgets) : null,
+  };
+}
+
+export async function setUserLocale(userId: string, locale: string): Promise<void> {
+  await db.prepare("UPDATE users SET locale = ? WHERE id = ?").run(locale, userId);
+}
+
+export async function setUserStatisticsWidgets(userId: string, widgetIds: string[]): Promise<void> {
+  await db.prepare("UPDATE users SET statistics_widgets = ? WHERE id = ?").run(JSON.stringify(widgetIds), userId);
+}
+
+/* ---------------------------------------------------------------------- *
  * Password reset — self-service, email-based (see password_reset_tokens in
  * src/lib/db.ts and sendPasswordResetEmail in src/lib/notify.ts). Used by
  * /forgot-password and /reset-password, and by the /api/auth/* routes

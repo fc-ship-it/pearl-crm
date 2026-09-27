@@ -393,6 +393,15 @@ async function initDb(): Promise<void> {
   // Team members (Settings -> Team): blocks a teammate's login without
   // touching the contacts/deals/tasks they own — see deactivateTeamMember.
   await addMissingColumns("users", [["deactivated_at", "TEXT"]]);
+  await addMissingColumns("users", [
+    // UI language preference (en/it/ar) — per-user, not per-org, since two
+    // teammates on the same account may want different languages.
+    ["locale", "TEXT"],
+    // Which Statistics-page widgets this user has chosen to show, and in
+    // what order — JSON array of widget ids, e.g. '["pipeline_value","hot_leads",...]'.
+    // Null/missing means "show all, default order".
+    ["statistics_widgets", "TEXT"],
+  ]);
   await addMissingColumns("integrations", [
     ["access_token", "TEXT"],
     ["refresh_token", "TEXT"],

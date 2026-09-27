@@ -52,6 +52,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               "try{var t=localStorage.getItem('pearl.theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}",
           }}
         />
+        {/* Same idea for language direction: an Arabic-reading user's saved
+            locale sets dir="rtl" before paint, so the layout doesn't flash
+            left-to-right and then jump to right-to-left once <AppShell> and
+            <LanguageSwitcher> hydrate and reconcile it with the DB value. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var l=localStorage.getItem('pearl.locale');if(l){document.documentElement.lang=l;document.documentElement.dir=(l==='ar')?'rtl':'ltr';}}catch(e){}",
+          }}
+        />
       </head>
       <body>{children}</body>
     </html>

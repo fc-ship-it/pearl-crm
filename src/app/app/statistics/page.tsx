@@ -1,15 +1,20 @@
 import { getSession } from "@/lib/auth";
-import { dashboardStats, listDeals, listContacts, type Deal, type Contact } from "@/lib/data";
+import { dashboardStats, listDeals, listContacts, getUserPreferences, type Deal, type Contact } from "@/lib/data";
 import {
   formatCurrency,
   stageConfig,
-  STAGES,
   OPEN_STAGES,
   contactSourceConfig,
   CONTACT_SOURCE_ORDER,
   CONTACT_SOURCE_COLORS,
+  STATISTICS_WIDGETS,
+  resolveStatisticsWidgets,
+  type StatisticsWidgetId,
 } from "@/lib/domain";
+import { translator } from "@/lib/i18n";
+import { resolveUserLocale } from "@/lib/i18n-server";
 import LeadTemperatureWidget from "@/components/LeadTemperatureWidget";
+import StatisticsWidgetCustomizer from "@/components/StatisticsWidgetCustomizer";
 import { TrendingUp, Trophy, Users, Flame } from "lucide-react";
 
 export default async function StatisticsPage() {
@@ -22,56 +27,114 @@ export default async function StatisticsPage() {
   const deals = await listDeals(orgId, viewerOwnerId);
   const contacts = await listContacts(orgId, {}, viewerOwnerId);
   const hotCount = contacts.filter((c) => c.temperature === "hot").length;
+  const locale = await resolveUserLocale(session!.userId);
+  const t = translator(locale);
+  const prefs = await getUserPreferences(session!.userId);
+  const widgetOrder = resolveStatisticsWidgets(prefs.statisticsWidgets);
+
+  const statValues: Record<string, { icon: typeof TrendingUp; value: string; accent: string }> = {
+    open_pipeline_value: { icon: TrendingUp, value: formatCurrency(stats.pipelineValue), accent: "var(--cyan)" },
+    closed_won_value: { icon: Trophy, value: formatCurrency(stats.wonValue), accent: "var(--success)" },
+    total_contacts: { icon: Users, value: String(contacts.length), accent: "var(--gold)" },
+    hot_leads: { icon: Flame, value: String(hotCount), accent: "var(--danger)" },
+  };
+
+  const statCardIds = widgetOrder.filter((id) => STATISTICS_WIDGETS.find((w) => w.id === id)?.kind === "stat");
+  const chartIds = widgetOrder.filter((id) => STATISTICS_WIDGETS.find((w) => w.id === id)?.kind === "chart");
+
+  function widgetLabel(id: StatisticsWidgetId) {
+    const w = STATISTICS_WIDGETS.find((w) => w.id === id);
+    return w ? t(w.labelKey) : id;
+  }
+
+  function renderChart(id: StatisticsWidgetId) {
+    switch (id) {
+      case "pipeline_by_stage":
+        return (
+          <div key={id} className="card p-5">
+            <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
+              {widgetLabel(id)}
+            </h2>
+            <StageBarChart deals={deals} />
+          </div>
+        );
+      case "lead_temperature":
+        return (
+          <div key={id} className="card p-5">
+            <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
+              {widgetLabel(id)}
+            </h2>
+            <LeadTemperatureWidget contacts={contacts} />
+          </div>
+        );
+      case "contacts_by_source":
+        return (
+          <div key={id} className="card p-5">
+            <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
+              {widgetLabel(id)}
+            </h2>
+            <SourceBarChart contacts={contacts} noContactsLabel={t("statistics.noContactsYet")} />
+          </div>
+        );
+      case "contacts_trend":
+        return (
+          <div key={id} className="card p-5">
+            <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
+              {widgetLabel(id)}
+            </h2>
+            <ContactsTrend contacts={contacts} />
+          </div>
+        );
+      default:
+        return null;
+    }
+  }
 
   return (
     <div className="space-y-6 max-w-[1400px]">
-      <div>
-        <h1 className="font-display text-xl" style={{ color: "var(--ink)" }}>
-          Statistics
-        </h1>
-        <p className="text-sm mt-1" style={{ color: "var(--ink-dim)" }}>
-          Pipeline, contacts, and lead-quality trends at a glance.
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-display text-xl" style={{ color: "var(--ink)" }}>
+            {t("statistics.title")}
+          </h1>
+          <p className="text-sm mt-1" style={{ color: "var(--ink-dim)" }}>
+            {t("statistics.subtitle")}
+          </p>
+        </div>
+        <StatisticsWidgetCustomizer
+          allWidgets={STATISTICS_WIDGETS.map((w) => ({ id: w.id, label: t(w.labelKey) }))}
+          selectedIds={widgetOrder}
+          labels={{
+            customize: t("common.customize"),
+            title: t("statistics.customizeWidgets"),
+            help: t("statistics.customizeHelp"),
+            save: t("common.save"),
+            cancel: t("common.cancel"),
+            moveUp: t("statistics.moveUp"),
+            moveDown: t("statistics.moveDown"),
+          }}
+        />
+      </div>
+
+      {statCardIds.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {statCardIds.map((id) => {
+            const cfg = statValues[id];
+            if (!cfg) return null;
+            return <StatCard key={id} icon={cfg.icon} label={widgetLabel(id)} value={cfg.value} accent={cfg.accent} />;
+          })}
+        </div>
+      )}
+
+      {chartIds.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{chartIds.map((id) => renderChart(id))}</div>
+      )}
+
+      {widgetOrder.length === 0 && (
+        <p className="text-sm card p-6" style={{ color: "var(--ink-dim)" }}>
+          {t("statistics.customizeHelp")}
         </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard icon={TrendingUp} label="Open pipeline value" value={formatCurrency(stats.pipelineValue)} accent="var(--cyan)" />
-        <StatCard icon={Trophy} label="Closed won value" value={formatCurrency(stats.wonValue)} accent="var(--success)" />
-        <StatCard icon={Users} label="Total contacts" value={String(contacts.length)} accent="var(--gold)" />
-        <StatCard icon={Flame} label="Hot leads" value={String(hotCount)} accent="var(--danger)" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card p-5">
-          <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
-            Pipeline value by stage
-          </h2>
-          <StageBarChart deals={deals} />
-        </div>
-
-        <div className="card p-5">
-          <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
-            Lead temperature
-          </h2>
-          <LeadTemperatureWidget contacts={contacts} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card p-5">
-          <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
-            Contacts by source
-          </h2>
-          <SourceBarChart contacts={contacts} />
-        </div>
-
-        <div className="card p-5">
-          <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
-            New contacts, last 8 weeks
-          </h2>
-          <ContactsTrend contacts={contacts} />
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -132,7 +195,7 @@ function StageBarChart({ deals }: { deals: Deal[] }) {
 /** Categorical breakdown, fixed source order (never re-sorted by count so a
  * color always means the same source), validated 4-color palette — legend
  * pairs every swatch with its label since >= 2 series are shown. */
-function SourceBarChart({ contacts }: { contacts: Contact[] }) {
+function SourceBarChart({ contacts, noContactsLabel }: { contacts: Contact[]; noContactsLabel: string }) {
   const counts = new Map<string, number>();
   contacts.forEach((c) => counts.set(c.source || "manual", (counts.get(c.source || "manual") || 0) + 1));
   const max = Math.max(1, ...CONTACT_SOURCE_ORDER.map((s) => counts.get(s) || 0));
@@ -165,7 +228,7 @@ function SourceBarChart({ contacts }: { contacts: Contact[] }) {
       })}
       {contacts.length === 0 && (
         <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
-          No contacts yet.
+          {noContactsLabel}
         </p>
       )}
     </div>

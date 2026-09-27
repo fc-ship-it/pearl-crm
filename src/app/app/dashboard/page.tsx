@@ -1,6 +1,8 @@
 import { getSession } from "@/lib/auth";
 import { dashboardStats, listTasks, listMeetings, listDeals, listContacts, hasAnsweredFeatureInterest, type Deal } from "@/lib/data";
 import { formatCurrency, urgencyLevel, relativeDaysLabel, URGENCY_COLORS, stageConfig } from "@/lib/domain";
+import { translator } from "@/lib/i18n";
+import { resolveUserLocale } from "@/lib/i18n-server";
 import Link from "next/link";
 import TaskChecklist from "@/components/TaskChecklist";
 import LeadTemperatureWidget from "@/components/LeadTemperatureWidget";
@@ -18,15 +20,17 @@ export default async function DashboardPage() {
   const meetings = (await listMeetings(orgId)).slice(0, 3);
   const contacts = await listContacts(orgId, {}, viewerOwnerId);
   const showInterestBanner = !(await hasAnsweredFeatureInterest(session!.userId));
+  const locale = await resolveUserLocale(session!.userId);
+  const t = translator(locale);
 
   return (
     <div className="space-y-6 max-w-[1400px]">
       <div>
         <h1 className="font-display text-xl" style={{ color: "var(--ink)" }}>
-          Good morning, {session!.name.split(" ")[0]}
+          {t("dashboard.greeting", { name: session!.name.split(" ")[0] })}
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--ink-dim)" }}>
-          Here's what deserves your attention today.
+          {t("dashboard.subtitle")}
         </p>
       </div>
 
@@ -37,7 +41,7 @@ export default async function DashboardPage() {
           <div className="flex items-center gap-2 mb-2">
             <BellRing size={15} color="var(--warning)" />
             <span className="text-sm font-medium" style={{ color: "var(--ink)" }}>
-              {stats.dueCustomAlerts.length} custom alert{stats.dueCustomAlerts.length === 1 ? "" : "s"} due
+              {t("dashboard.customAlertsDue", { count: stats.dueCustomAlerts.length })}
             </span>
           </div>
           <div className="space-y-1">
@@ -48,32 +52,32 @@ export default async function DashboardPage() {
             ))}
           </div>
           <Link href="/app/campaigns" className="text-xs mt-2 inline-block" style={{ color: "var(--cyan)" }}>
-            Manage alerts →
+            {t("dashboard.manageAlerts")}
           </Link>
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard icon={TrendingUp} label="Open pipeline value" value={formatCurrency(stats.pipelineValue)} accent="var(--cyan)" />
-        <StatCard icon={Trophy} label="Closed won" value={formatCurrency(stats.wonValue)} accent="var(--success)" />
-        <StatCard icon={Percent} label="Conversion rate" value={`${stats.conversionRate}%`} accent="var(--gold)" />
-        <StatCard icon={AlertTriangle} label="Deals at risk" value={String(stats.dealsAtRisk.length)} accent="var(--danger)" />
+        <StatCard icon={TrendingUp} label={t("dashboard.stat.openPipeline")} value={formatCurrency(stats.pipelineValue)} accent="var(--cyan)" />
+        <StatCard icon={Trophy} label={t("dashboard.stat.closedWon")} value={formatCurrency(stats.wonValue)} accent="var(--success)" />
+        <StatCard icon={Percent} label={t("dashboard.stat.conversionRate")} value={`${stats.conversionRate}%`} accent="var(--gold)" />
+        <StatCard icon={AlertTriangle} label={t("dashboard.stat.dealsAtRisk")} value={String(stats.dealsAtRisk.length)} accent="var(--danger)" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card p-5 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-display text-sm" style={{ color: "var(--ink)" }}>
-              Reactivate today
+              {t("dashboard.reactivateToday")}
             </h2>
             <Link href="/app/pipeline" className="text-xs" style={{ color: "var(--cyan)" }}>
-              View pipeline →
+              {t("dashboard.viewPipeline")}
             </Link>
           </div>
           <div className="space-y-2">
             {stats.dealsAtRisk.length === 0 && (
               <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
-                No quiet contacts right now. Great work.
+                {t("dashboard.noQuietContacts")}
               </p>
             )}
             {stats.dealsAtRisk.map(({ deal, score }) => {
@@ -112,7 +116,7 @@ export default async function DashboardPage() {
 
         <div className="card p-5">
           <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
-            Today's activity
+            {t("dashboard.todaysActivity")}
           </h2>
           <TaskChecklist tasks={tasks} />
         </div>
@@ -121,12 +125,12 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card p-5">
           <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
-            Recent AI meeting minutes
+            {t("dashboard.recentMeetings")}
           </h2>
           <div className="space-y-2">
             {meetings.length === 0 && (
               <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
-                No meetings logged yet.
+                {t("dashboard.noMeetingsYet")}
               </p>
             )}
             {meetings.map((m) => (
@@ -150,13 +154,13 @@ export default async function DashboardPage() {
             className="mt-4 inline-block text-xs px-3 py-2 rounded-lg"
             style={{ background: "var(--gold)", color: "var(--ink)" }}
           >
-            + New meeting
+            {t("dashboard.newMeeting")}
           </Link>
         </div>
 
         <div className="card p-5">
           <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
-            Pipeline by stage
+            {t("dashboard.pipelineByStage")}
           </h2>
           <PipelineMiniBars orgId={orgId} viewerOwnerId={viewerOwnerId} />
         </div>
@@ -164,10 +168,10 @@ export default async function DashboardPage() {
         <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-display text-sm" style={{ color: "var(--ink)" }}>
-              Lead temperature
+              {t("dashboard.leadTemperature")}
             </h2>
             <Link href="/app/statistics" className="text-xs" style={{ color: "var(--cyan)" }}>
-              Full stats →
+              {t("dashboard.fullStats")}
             </Link>
           </div>
           <LeadTemperatureWidget contacts={contacts} size={104} />

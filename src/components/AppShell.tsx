@@ -25,19 +25,21 @@ import {
 import ReminderNotifier from "@/components/ReminderNotifier";
 import QuickAddMenu from "@/components/QuickAddMenu";
 import ThemeToggle from "@/components/ThemeToggle";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { translator, type Locale } from "@/lib/i18n";
 
 const NAV = [
-  { href: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/app/pipeline", label: "Pipeline", icon: Kanban },
-  { href: "/app/contacts", label: "Contacts", icon: Users },
-  { href: "/app/plan-week", label: "Plan my week", icon: MapPinned },
-  { href: "/app/meetings", label: "AI Meetings", icon: Video },
-  { href: "/app/campaigns", label: "Campaigns & alerts", icon: Megaphone },
-  { href: "/app/statistics", label: "Statistics", icon: BarChart3 },
-  { href: "/app/network", label: "Business Match", icon: Handshake },
-  { href: "/app/settings/integrations", label: "Integrations", icon: Plug },
-  { href: "/app/settings/team", label: "Team", icon: UserPlus, adminOnly: true },
-  { href: "/app/settings/billing", label: "Plan & billing", icon: CreditCard },
+  { href: "/app/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
+  { href: "/app/pipeline", labelKey: "nav.pipeline", icon: Kanban },
+  { href: "/app/contacts", labelKey: "nav.contacts", icon: Users },
+  { href: "/app/plan-week", labelKey: "nav.planWeek", icon: MapPinned },
+  { href: "/app/meetings", labelKey: "nav.meetings", icon: Video },
+  { href: "/app/campaigns", labelKey: "nav.campaigns", icon: Megaphone },
+  { href: "/app/statistics", labelKey: "nav.statistics", icon: BarChart3 },
+  { href: "/app/network", labelKey: "nav.businessMatch", icon: Handshake },
+  { href: "/app/settings/integrations", labelKey: "nav.integrations", icon: Plug },
+  { href: "/app/settings/team", labelKey: "nav.team", icon: UserPlus, adminOnly: true },
+  { href: "/app/settings/billing", labelKey: "nav.billing", icon: CreditCard },
 ];
 
 const COLLAPSE_KEY = "pearl.sidebarCollapsed";
@@ -58,6 +60,7 @@ export default function AppShell({
   trialDaysLeft,
   plan,
   isAdmin,
+  locale,
 }: {
   children: React.ReactNode;
   userName: string;
@@ -65,11 +68,13 @@ export default function AppShell({
   trialDaysLeft: number;
   plan: string;
   isAdmin: boolean;
+  locale: Locale;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const t = translator(locale);
 
   useEffect(() => {
     try {
@@ -109,12 +114,13 @@ export default function AppShell({
       {NAV.filter((item) => !item.adminOnly || isAdmin).map((item) => {
         const active = pathname.startsWith(item.href);
         const Icon = item.icon;
+        const label = t(item.labelKey);
         return (
           <Link
             key={item.href}
             href={item.href}
             onClick={onNavigate}
-            title={iconOnly ? item.label : undefined}
+            title={iconOnly ? label : undefined}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition ${iconOnly ? "justify-center" : ""}`}
             style={
               active
@@ -127,7 +133,7 @@ export default function AppShell({
             }
           >
             <Icon size={17} color={active ? "var(--gold)" : "var(--ink-dim)"} className="shrink-0" />
-            {!iconOnly && item.label}
+            {!iconOnly && label}
           </Link>
         );
       })}
@@ -136,9 +142,9 @@ export default function AppShell({
 
   const trialBadge = plan === "trial" && (
     <div className="mb-2 px-3 py-2 rounded-lg text-xs" style={{ background: "var(--panel-2)", color: "var(--ink-dim)" }}>
-      Free trial:{" "}
+      {t("common.freeTrial")}:{" "}
       <span style={{ color: trialDaysLeft <= 2 ? "var(--danger)" : "var(--gold)" }}>
-        {trialDaysLeft > 0 ? `${trialDaysLeft} days left` : "expired"}
+        {trialDaysLeft > 0 ? t("common.daysLeft", { count: trialDaysLeft }) : t("common.expired")}
       </span>
     </div>
   );
@@ -164,20 +170,20 @@ export default function AppShell({
           {!collapsed && trialBadge}
           <button
             onClick={logout}
-            title={collapsed ? "Log out" : undefined}
+            title={collapsed ? t("common.logout") : undefined}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:opacity-80 ${collapsed ? "justify-center" : ""}`}
             style={{ color: "var(--ink-dim)" }}
           >
-            <LogOut size={16} className="shrink-0" /> {!collapsed && "Log out"}
+            <LogOut size={16} className="shrink-0" /> {!collapsed && t("common.logout")}
           </button>
           <button
             onClick={toggleCollapsed}
-            title={collapsed ? "Expand menu" : "Collapse menu"}
+            title={collapsed ? t("common.expandMenu") : t("common.collapseMenu")}
             className={`w-full flex items-center gap-2 px-3 py-2 mt-1 rounded-lg text-sm hover:opacity-80 ${collapsed ? "justify-center" : ""}`}
             style={{ color: "var(--ink-dim)" }}
           >
             {collapsed ? <ChevronsRight size={16} className="shrink-0" /> : <ChevronsLeft size={16} className="shrink-0" />}
-            {!collapsed && "Collapse menu"}
+            {!collapsed && t("common.collapseMenu")}
           </button>
         </div>
       </aside>
@@ -211,7 +217,7 @@ export default function AppShell({
                 className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:opacity-80"
                 style={{ color: "var(--ink-dim)" }}
               >
-                <LogOut size={16} /> Log out
+                <LogOut size={16} /> {t("common.logout")}
               </button>
             </div>
           </div>
@@ -233,6 +239,7 @@ export default function AppShell({
               </div>
             </div>
             <div className="flex items-center gap-3 md:gap-4 shrink-0">
+              <LanguageSwitcher locale={locale} />
               <ThemeToggle />
               <QuickAddMenu />
               <ReminderNotifier />
