@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Users, Handshake, ListChecks, Video, X } from "lucide-react";
 import { STAGES } from "@/lib/domain";
+import SearchableSelect from "@/components/SearchableSelect";
 
 type Tab = "contact" | "deal" | "task" | "meeting";
 type LiteContact = { id: string; name: string };
@@ -217,14 +218,15 @@ function QuickDealForm({
           ))}
         </select>
       </div>
-      <select value={contactId} onChange={(e) => setContactId(e.target.value)} className={fieldClass} style={inputStyle}>
-        <option value="">No contact linked</option>
-        {(contacts || []).map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+      <SearchableSelect
+        options={(contacts || []).map((c) => ({ id: c.id, label: c.name }))}
+        value={contactId}
+        onChange={setContactId}
+        placeholder="Search contacts…"
+        emptyLabel="No contact linked"
+        inputStyle={inputStyle}
+        className={fieldClass}
+      />
       {error && (
         <p className="text-xs font-semibold" style={{ color: "var(--danger)" }}>
           {error}
@@ -300,23 +302,24 @@ function QuickTaskForm({
           <option value="high">High priority</option>
         </select>
       </div>
-      <select value={contactId} onChange={(e) => setContactId(e.target.value)} className={fieldClass} style={inputStyle}>
-        <option value="">No contact linked</option>
-        {(contacts || []).map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-      <select value={dealId} onChange={(e) => setDealId(e.target.value)} className={fieldClass} style={inputStyle}>
-        <option value="">No deal linked</option>
-        {(deals || []).map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.title}
-            {d.contactName ? ` — ${d.contactName}` : ""}
-          </option>
-        ))}
-      </select>
+      <SearchableSelect
+        options={(contacts || []).map((c) => ({ id: c.id, label: c.name }))}
+        value={contactId}
+        onChange={setContactId}
+        placeholder="Search contacts…"
+        emptyLabel="No contact linked"
+        inputStyle={inputStyle}
+        className={fieldClass}
+      />
+      <SearchableSelect
+        options={(deals || []).map((d) => ({ id: d.id, label: d.title, sublabel: d.contactName }))}
+        value={dealId}
+        onChange={setDealId}
+        placeholder="Search deals…"
+        emptyLabel="No deal linked"
+        inputStyle={inputStyle}
+        className={fieldClass}
+      />
       {error && (
         <p className="text-xs font-semibold" style={{ color: "var(--danger)" }}>
           {error}

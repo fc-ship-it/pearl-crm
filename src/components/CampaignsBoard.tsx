@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Send, CheckCircle2, Clock, Megaphone, BellRing, Phone, CalendarClock, StickyNote } from "lucide-react";
 import type { Campaign, CustomAlert } from "@/lib/data";
 import { BUDGET_TIERS, CAMPAIGN_CHANNELS, formatDate } from "@/lib/domain";
+import SearchableSelect from "@/components/SearchableSelect";
 
 const inputStyle = { background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" } as const;
 
@@ -325,14 +326,15 @@ function AlertsPanel({ alerts, contacts }: { alerts: CustomAlert[]; contacts: { 
                 </option>
               ))}
             </select>
-            <select value={contactId} onChange={(e) => setContactId(e.target.value)} className="px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle}>
-              <option value="">No contact linked</option>
-              {contacts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              options={contacts.map((c) => ({ id: c.id, label: c.name }))}
+              value={contactId}
+              onChange={setContactId}
+              placeholder="Search contacts…"
+              emptyLabel="No contact linked"
+              inputStyle={inputStyle}
+              className="px-3 py-2 rounded-lg text-sm outline-none"
+            />
           </div>
           <input type="datetime-local" value={remindAt} onChange={(e) => setRemindAt(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
           <button type="submit" disabled={saving} className="w-full py-2 rounded-lg text-xs font-medium disabled:opacity-60" style={{ background: "var(--gold)", color: "var(--ink)" }}>

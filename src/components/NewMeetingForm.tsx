@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Contact, Deal } from "@/lib/data";
+import SearchableSelect from "@/components/SearchableSelect";
 
 export default function NewMeetingForm({ contacts, deals }: { contacts: Contact[]; deals: Deal[] }) {
   const [title, setTitle] = useState("");
@@ -61,34 +62,31 @@ export default function NewMeetingForm({ contacts, deals }: { contacts: Contact[
           <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
             Contact
           </label>
-          <select
+          <SearchableSelect
+            options={contacts.map((c) => ({ id: c.id, label: c.name }))}
             value={contactId}
-            onChange={(e) => {
-              setContactId(e.target.value);
+            onChange={(id) => {
+              setContactId(id);
               setDealId("");
             }}
+            placeholder="Search contacts…"
+            inputStyle={inputStyle}
             className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none"
-            style={inputStyle}
-          >
-            {contacts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          />
         </div>
         <div>
           <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
             Linked opportunity (optional)
           </label>
-          <select value={dealId} onChange={(e) => setDealId(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle}>
-            <option value="">— None —</option>
-            {availableDeals.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.title}
-              </option>
-            ))}
-          </select>
+          <SearchableSelect
+            options={availableDeals.map((d) => ({ id: d.id, label: d.title }))}
+            value={dealId}
+            onChange={setDealId}
+            placeholder="Search deals…"
+            emptyLabel="— None —"
+            inputStyle={inputStyle}
+            className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none"
+          />
         </div>
       </div>
       <div>
