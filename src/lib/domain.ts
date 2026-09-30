@@ -298,3 +298,16 @@ export var CAMPAIGN_CHANNELS = [
   { id: "whatsapp", label: "WhatsApp" },
   { id: "email", label: "Email" },
 ] as const;
+
+/** How a meeting happens — chosen when scheduling it. "detail" holds the
+ * Zoom/Meet link for the two video options, or the physical address for
+ * in-person; shown as a badge + link/address wherever the meeting appears. */
+export const MEETING_LOCATION_TYPES = [
+  { id: "zoom", label: "Zoom", icon: "video", detailLabel: "Zoom link", detailPlaceholder: "https://zoom.us/j/…" },
+  { id: "google_meet", label: "Google Meet", icon: "video", detailLabel: "Meet link", detailPlaceholder: "https://meet.google.com/…" },
+  { id: "in_person", label: "In person", icon: "map-pin", detailLabel: "Location / address", detailPlaceholder: "E.g. Client office, Sheikh Zayed Rd" },
+] as const;
+export type MeetingLocationTypeId = (typeof MEETING_LOCATION_TYPES)[number]["id"];
+export function meetingLocationTypeConfig(id: string | null | undefined) {
+  return MEETING_LOCATION_TYPES.find((t) => t.id === id) ?? null;
+}

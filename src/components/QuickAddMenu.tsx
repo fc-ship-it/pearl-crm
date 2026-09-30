@@ -268,6 +268,11 @@ function QuickTaskForm({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title,
+        // dueDate comes from a datetime-local input ("YYYY-MM-DDTHH:mm", no
+        // timezone suffix) — JS parses that as LOCAL time, unlike a date-only
+        // string (which parses as UTC midnight and silently loses the time
+        // the user picked). That's the whole fix for the "orario non va bene"
+        // report: switching the input type below is what makes this correct.
         dueDate: dueDate ? new Date(dueDate).toISOString() : null,
         priority,
         contactId: contactId || null,
@@ -295,7 +300,13 @@ function QuickTaskForm({
         style={inputStyle}
       />
       <div className="grid grid-cols-2 gap-2">
-        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={fieldClass} style={inputStyle} />
+        <input
+          type="datetime-local"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className={fieldClass}
+          style={inputStyle}
+        />
         <select value={priority} onChange={(e) => setPriority(e.target.value)} className={fieldClass} style={inputStyle}>
           <option value="low">Low priority</option>
           <option value="medium">Medium priority</option>

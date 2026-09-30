@@ -4,6 +4,7 @@ import { db, id, now } from "@/lib/db";
 import { generateVerbale } from "@/lib/verbale";
 import { getValidGoogleAccessToken, createCalendarEvent } from "@/lib/google";
 import { getValidOutlookAccessToken, createOutlookCalendarEvent } from "@/lib/outlook";
+import { meetingLocationTypeConfig } from "@/lib/domain";
 
 export const runtime = "nodejs";
 
@@ -23,10 +24,19 @@ export async function POST(req: NextRequest) {
   const participants = [session.name, contact?.name].filter(Boolean) as string[];
   const summary = generateVerbale(body.transcript || body.agenda || "", participants);
 
+  // The meeting's own date/time is user-settable (defaults to "now" when
+  // omitted, for backward compatibility with any older caller). Location
+  // type is validated against the known set so a bad/forged value can't get
+  // stored — an unrecognized one is treated the same as "not set".
+  const meetingDate = body.date && !isNaN(new Date(body.date).getTime()) ? new Date(body.date).toISOString() : now();
+  const locationTypeConfig = meetingLocationTypeConfig(body.locationType);
+  const locationType = locationTypeConfig?.id ?? null;
+  const locationDetail = locationType ? (body.locationDetail || null) : null;
+
   const meetingId = id();
   await db
     .prepare(
-      "INSERT INTO meetings (id, org_id, contact_id, deal_id, title, date, transcript, summary_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)"
+      "INSERT INTO meetings (id, org_id, contact_id, deal_id, title, date, transcript, summary_json, created_at, location_type, location_detail) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
     )
     .run(
       meetingId,
@@ -34,21 +44,48 @@ export async function POST(req: NextRequest) {
       body.contactId,
       body.dealId || null,
       body.title,
-      now(),
+      meetingDate,
       body.transcript || body.agenda || null,
       JSON.stringify(summary),
-      now()
+      now(),
+      locationType,
+      locationDetail
     );
+
+  // If Google Calendar and/or Outlook Calendar is connected, the meeting
+  // itself also becomes a real calendar event — the Zoom/Meet link or
+  // in-person address (if set) goes in as the event's location. Unlike email
+  // (where sending twice would duplicate a message to a contact), creating
+  // the same event on both calendars is harmless and is what someone who
+  // deliberately connected both mailboxes would expect.
+  const googleAccessToken = await getValidGoogleAccessToken(session.orgId, session.userId).catch(() => null);
+  const outlookAccessToken = await getValidOutlookAccessToken(session.orgId, session.userId).catch(() => null);
+
+  if (googleAccessToken || outlookAccessToken) {
+    const start = new Date(meetingDate);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const meetingEventPayload = {
+      summary: body.title,
+      description: `Meeting with ${contact?.name || "contact"} — created automatically by Pearl.`,
+      startISO: start.toISOString(),
+      endISO: end.toISOString(),
+      location: locationDetail || (locationTypeConfig ? locationTypeConfig.label : null),
+    };
+    if (googleAccessToken) {
+      await createCalendarEvent(googleAccessToken, meetingEventPayload).catch(() => {
+        // Best-effort: a failed calendar sync never blocks saving the meeting.
+      });
+    }
+    if (outlookAccessToken) {
+      await createOutlookCalendarEvent(outlookAccessToken, meetingEventPayload).catch(() => {
+        // Best-effort: a failed calendar sync never blocks saving the meeting.
+      });
+    }
+  }
 
   // Next steps automatically become linked tasks, per spec. If Google
   // Calendar and/or Outlook Calendar is connected, each dated one also
-  // becomes a real calendar event on every connected calendar — that's the
-  // concrete payoff of connecting Calendar in Settings. Unlike email (where
-  // sending twice would duplicate a message to a contact), creating the same
-  // event on both calendars is harmless and is what someone who deliberately
-  // connected both mailboxes would expect.
-  const googleAccessToken = await getValidGoogleAccessToken(session.orgId, session.userId).catch(() => null);
-  const outlookAccessToken = await getValidOutlookAccessToken(session.orgId, session.userId).catch(() => null);
+  // becomes a real calendar event on every connected calendar.
   for (const step of summary.nextSteps) {
     await db
       .prepare(

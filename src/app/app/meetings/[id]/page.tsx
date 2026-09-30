@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { getMeeting } from "@/lib/data";
-import { formatDate } from "@/lib/domain";
-import { CheckCircle2, MessageSquareWarning, ListChecks, ArrowRight, Users } from "lucide-react";
+import { formatDate, meetingLocationTypeConfig } from "@/lib/domain";
+import { CheckCircle2, MessageSquareWarning, ListChecks, ArrowRight, Users, Video, MapPin } from "lucide-react";
 
 export default async function MeetingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -10,6 +10,7 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   const meeting = await getMeeting(session!.orgId, id);
   if (!meeting || !meeting.summary) notFound();
   const s = meeting.summary;
+  const locationConfig = meetingLocationTypeConfig(meeting.locationType);
 
   return (
     <div className="max-w-[800px] space-y-5">
@@ -20,6 +21,20 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
         <p className="text-sm mt-1 flex items-center gap-2" style={{ color: "var(--ink-dim)" }}>
           <Users size={14} /> {s.participants.join(", ")} · {formatDate(meeting.date)}
         </p>
+        {locationConfig && (
+          <p className="text-sm mt-1.5 flex items-center gap-2" style={{ color: "var(--ink)" }}>
+            {locationConfig.id === "in_person" ? <MapPin size={14} color="var(--cyan)" /> : <Video size={14} color="var(--cyan)" />}
+            <span className="font-medium">{locationConfig.label}</span>
+            {meeting.locationDetail &&
+              (locationConfig.id === "in_person" ? (
+                <span style={{ color: "var(--ink-dim)" }}>{meeting.locationDetail}</span>
+              ) : (
+                <a href={meeting.locationDetail} target="_blank" rel="noopener noreferrer" style={{ color: "var(--cyan)" }}>
+                  {meeting.locationDetail}
+                </a>
+              ))}
+          </p>
+        )}
       </div>
 
       <Section icon={ListChecks} title="Key points discussed" items={s.keyPoints} accent="var(--cyan)" />

@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { listMeetings } from "@/lib/data";
-import { relativeDaysLabel } from "@/lib/domain";
-import { Plus } from "lucide-react";
+import { relativeDaysLabel, meetingLocationTypeConfig } from "@/lib/domain";
+import { Plus, Video, MapPin } from "lucide-react";
 
 export default async function MeetingsPage() {
   const session = await getSession();
@@ -34,21 +34,31 @@ export default async function MeetingsPage() {
             No meetings yet. Create one to see the minutes generated automatically.
           </p>
         )}
-        {meetings.map((m) => (
-          <Link key={m.id} href={`/app/meetings/${m.id}`} className="card p-4 flex items-center justify-between block hover:opacity-90">
-            <div>
-              <div className="text-sm" style={{ color: "var(--ink)" }}>
-                {m.title}
+        {meetings.map((m) => {
+          const locationConfig = meetingLocationTypeConfig(m.locationType);
+          return (
+            <Link key={m.id} href={`/app/meetings/${m.id}`} className="card p-4 flex items-center justify-between block hover:opacity-90">
+              <div>
+                <div className="text-sm" style={{ color: "var(--ink)" }}>
+                  {m.title}
+                </div>
+                <div className="text-xs mt-0.5 flex items-center gap-1.5" style={{ color: "var(--ink-dim)" }}>
+                  <span>
+                    {m.contactName} · {relativeDaysLabel(m.date)}
+                  </span>
+                  {locationConfig && (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ background: "var(--panel-2)" }}>
+                      {locationConfig.id === "in_person" ? <MapPin size={10} /> : <Video size={10} />} {locationConfig.label}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="text-xs mt-0.5" style={{ color: "var(--ink-dim)" }}>
-                {m.contactName} · {relativeDaysLabel(m.date)}
+              <div className="text-xs" style={{ color: "var(--cyan)" }}>
+                View minutes →
               </div>
-            </div>
-            <div className="text-xs" style={{ color: "var(--cyan)" }}>
-              View minutes →
-            </div>
-          </Link>
-        ))}
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

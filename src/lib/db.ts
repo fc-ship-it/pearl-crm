@@ -402,6 +402,13 @@ async function initDb(): Promise<void> {
     // Null/missing means "show all, default order".
     ["statistics_widgets", "TEXT"],
   ]);
+  await addMissingColumns("meetings", [
+    // How the meeting happens — 'zoom' | 'google_meet' | 'in_person'. Null on
+    // every meeting logged before this existed (they just don't show a badge).
+    ["location_type", "TEXT"],
+    // The Zoom/Meet link, or the physical address, depending on the type above.
+    ["location_detail", "TEXT"],
+  ]);
   await addMissingColumns("integrations", [
     ["access_token", "TEXT"],
     ["refresh_token", "TEXT"],

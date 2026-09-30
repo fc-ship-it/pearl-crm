@@ -135,6 +135,11 @@ export type Meeting = {
   summary: MeetingSummary | null;
   createdAt: string;
   contactName?: string;
+  /** 'zoom' | 'google_meet' | 'in_person' — null on meetings logged before
+   * this existed. See MEETING_LOCATION_TYPES in domain.ts. */
+  locationType: string | null;
+  /** The Zoom/Meet link, or the physical address — meaning depends on locationType. */
+  locationDetail: string | null;
 };
 
 export type MeetingSummary = {
@@ -625,6 +630,8 @@ function toMeeting(r: any): Meeting {
     summary: r.summary_json ? JSON.parse(r.summary_json) : null,
     createdAt: r.created_at,
     contactName: r.contact_name ?? undefined,
+    locationType: r.location_type ?? null,
+    locationDetail: r.location_detail ?? null,
   };
 }
 
