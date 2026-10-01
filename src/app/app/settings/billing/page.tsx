@@ -1,6 +1,7 @@
 import { getSession } from "@/lib/auth";
 import { getOrganization } from "@/lib/data";
-import { formatDate, BILLING_PLANS, billingPlanConfig } from "@/lib/domain";
+import { resolveUserLocale } from "@/lib/i18n-server";
+import { formatDate, BILLING_PLANS, billingPlanConfig, billingPlanAmount, formatBillingAmount, annualYearlyEquivalentLabel, type CurrencyId } from "@/lib/domain";
 import SubscribeButton from "@/components/SubscribeButton";
 import ManageBillingButton from "@/components/ManageBillingButton";
 import { Check, CheckCircle2, AlertTriangle, Info } from "lucide-react";
@@ -41,6 +42,14 @@ export default async function BillingPage({
   const isTrial = org.subscription_status === "trialing";
   const isPastDue = org.subscription_status === "past_due";
   const hasStripeAccount = !!org.stripe_customer_id;
+
+  // Once this org has ever actually been charged, its real Stripe currency
+  // is the only one shown (prevents the price list silently flipping if the
+  // admin later changes their display language) — otherwise, fall back to
+  // their saved language (Italian → EUR) as a reasonable guess before their
+  // first payment.
+  const currency: CurrencyId =
+    org.billing_currency === "EUR" || org.billing_currency === "AED" ? org.billing_currency : (await resolveUserLocale(session!.userId)) === "it" ? "EUR" : "AED";
 
   return (
     <div className="max-w-[1100px]">
@@ -128,10 +137,12 @@ export default async function BillingPage({
               )}
             </div>
             <div className="font-display text-2xl mt-1" style={{ color: "var(--ink)" }}>
-              AED {p.amountAed} <span className="text-sm font-normal" style={{ color: "var(--ink-dim)" }}>{p.period}</span>
+              {formatBillingAmount(billingPlanAmount(p, currency), currency)} <span className="text-sm font-normal" style={{ color: "var(--ink-dim)" }}>{p.period}</span>
             </div>
             <p className="text-xs mt-1.5 mb-4" style={{ color: p.highlighted ? "var(--gold)" : "var(--ink-dim)" }}>
-              {p.note}
+              {p.id === "annual"
+                ? `2 months free vs. paying monthly (${annualYearlyEquivalentLabel(currency)}/year). Auto-renews yearly.`
+                : p.note}
             </p>
             <ul className="space-y-2 mb-5">
               {INCLUDED_FEATURES.map((f) => (
@@ -143,7 +154,7 @@ export default async function BillingPage({
             {activePlan?.id === p.id && !isTrial ? (
               hasStripeAccount && <ManageBillingButton label="Change or cancel" />
             ) : (
-              <SubscribeButton interval={p.id} label={`AED ${p.amountAed}${p.period}`} highlighted={p.highlighted} />
+              <SubscribeButton interval={p.id} label={`${formatBillingAmount(billingPlanAmount(p, currency), currency)}${p.period}`} highlighted={p.highlighted} />
             )}
           </div>
         ))}

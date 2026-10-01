@@ -987,6 +987,9 @@ export type Organization = {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_cancel_at_period_end: number;
+  /** 'AED' | 'EUR', or null before the first successful Stripe Checkout —
+   * see CurrencyId in domain.ts and applyStripeSubscription below. */
+  billing_currency: string | null;
   match_opt_in: number;
   match_headline: string | null;
   match_sector: string | null;
@@ -1302,6 +1305,9 @@ export async function applyStripeSubscription(
     intervalId: BillingIntervalId | null;
     periodEndIso: string | null;
     cancelAtPeriodEnd: boolean;
+    /** Optional so the narrower {@link applyFeaturedSubscription} call shape
+     * (which never sets this) still satisfies this type. */
+    currencyId?: string | null;
   }
 ): Promise<void> {
   await db
@@ -1313,7 +1319,8 @@ export async function applyStripeSubscription(
        billing_interval = COALESCE(?, billing_interval),
        plan = COALESCE(?, plan),
        billing_period_end = COALESCE(?, billing_period_end),
-       stripe_cancel_at_period_end = ?
+       stripe_cancel_at_period_end = ?,
+       billing_currency = COALESCE(?, billing_currency)
      WHERE id = ?`
     )
     .run(
@@ -1324,6 +1331,7 @@ export async function applyStripeSubscription(
       sub.intervalId,
       sub.periodEndIso,
       sub.cancelAtPeriodEnd ? 1 : 0,
+      sub.currencyId ?? null,
       orgId
     );
 }

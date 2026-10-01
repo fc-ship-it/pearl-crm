@@ -6,7 +6,7 @@ import { createSessionToken, SESSION_COOKIE } from "@/lib/auth";
 import { notifyOwnerOfSignup } from "@/lib/notify";
 import { createSubscriptionCheckout, StripeNotConfiguredError } from "@/lib/stripe";
 import { getAppBaseUrl } from "@/lib/google";
-import { BILLING_PLANS, type BillingIntervalId } from "@/lib/domain";
+import { BILLING_PLANS, type BillingIntervalId, type CurrencyId } from "@/lib/domain";
 
 export const runtime = "nodejs";
 
@@ -18,6 +18,10 @@ const schema = z.object({
   // Which plan the card-required trial starts on. Defaults to the
   // highlighted (monthly) plan if the signup form doesn't send one.
   interval: z.enum(["weekly", "monthly", "annual"]).optional(),
+  // Which currency Checkout shows/charges — the signup page infers this
+  // from the visitor's browser language (no account/locale exists yet to
+  // read it from); defaults to AED if the form doesn't send one.
+  currency: z.enum(["AED", "EUR"]).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -36,6 +40,7 @@ export async function POST(req: NextRequest) {
   const trialDays = 7;
   const trialEnds = new Date(Date.now() + trialDays * 24 * 3600 * 1000).toISOString();
   const interval: BillingIntervalId = parsed.data.interval ?? (BILLING_PLANS.find((p) => p.highlighted)?.id as BillingIntervalId) ?? "monthly";
+  const currency: CurrencyId = parsed.data.currency ?? "AED";
   const orgId = id();
   const appUrl = getAppBaseUrl(req.url);
 
@@ -49,6 +54,7 @@ export async function POST(req: NextRequest) {
     const { url } = await createSubscriptionCheckout({
       orgId,
       interval,
+      currency,
       customerEmail: email,
       successUrl: `${appUrl}/api/billing/stripe/confirm?session_id={CHECKOUT_SESSION_ID}&next=${encodeURIComponent(
         "/app/dashboard"

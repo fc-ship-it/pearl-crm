@@ -3,7 +3,8 @@ import { getSession } from "@/lib/auth";
 import { getOrganization, getOrgBillingContactEmail } from "@/lib/data";
 import { createSubscriptionCheckout, StripeNotConfiguredError } from "@/lib/stripe";
 import { getAppBaseUrl } from "@/lib/google";
-import { BILLING_PLANS, type BillingIntervalId } from "@/lib/domain";
+import { resolveUserLocale } from "@/lib/i18n-server";
+import { BILLING_PLANS, type BillingIntervalId, type CurrencyId } from "@/lib/domain";
 
 export const runtime = "nodejs";
 
@@ -31,10 +32,23 @@ export async function POST(req: NextRequest) {
   const appUrl = getAppBaseUrl(req.url);
   const email = (await getOrgBillingContactEmail(session.orgId)) ?? undefined;
 
+  // Once an org has ever been charged in a currency (billing_currency set by
+  // a real Stripe subscription), every later checkout — switching plans,
+  // reactivating — keeps using it, so a customer can't accidentally flip
+  // currency mid-relationship just by changing their display language.
+  // Only a brand-new org (never billed) falls back to a locale-based guess.
+  const currency: CurrencyId =
+    org.billing_currency === "EUR" || org.billing_currency === "AED"
+      ? org.billing_currency
+      : (await resolveUserLocale(session.userId)) === "it"
+      ? "EUR"
+      : "AED";
+
   try {
     const { url } = await createSubscriptionCheckout({
       orgId: session.orgId,
       interval,
+      currency,
       customerEmail: email,
       successUrl: `${appUrl}/api/billing/stripe/confirm?session_id={CHECKOUT_SESSION_ID}&next=${encodeURIComponent(
         "/app/settings/billing?paid=1"

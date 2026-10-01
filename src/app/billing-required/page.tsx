@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { getOrganization, isAccessBlocked } from "@/lib/data";
-import { BILLING_PLANS } from "@/lib/domain";
+import { resolveUserLocale } from "@/lib/i18n-server";
+import { BILLING_PLANS, billingPlanAmount, formatBillingAmount, annualYearlyEquivalentLabel, type CurrencyId } from "@/lib/domain";
 import SubscribeButton from "@/components/SubscribeButton";
 import LogoutLink from "@/components/LogoutLink";
 import { Check, PauseCircle } from "lucide-react";
@@ -22,6 +23,9 @@ export default async function BillingRequiredPage() {
   const org = await getOrganization(session.orgId);
   if (!org) redirect("/login");
   if (!isAccessBlocked(org)) redirect("/app/dashboard");
+
+  const currency: CurrencyId =
+    org.billing_currency === "EUR" || org.billing_currency === "AED" ? org.billing_currency : (await resolveUserLocale(session.userId)) === "it" ? "EUR" : "AED";
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "var(--bg)" }}>
@@ -49,10 +53,12 @@ export default async function BillingRequiredPage() {
                 {p.label}
               </div>
               <div className="font-display text-2xl mt-1" style={{ color: "var(--ink)" }}>
-                AED {p.amountAed} <span className="text-sm font-normal" style={{ color: "var(--ink-dim)" }}>{p.period}</span>
+                {formatBillingAmount(billingPlanAmount(p, currency), currency)} <span className="text-sm font-normal" style={{ color: "var(--ink-dim)" }}>{p.period}</span>
               </div>
               <p className="text-xs mt-1.5 mb-4" style={{ color: p.highlighted ? "var(--gold)" : "var(--ink-dim)" }}>
-                {p.note}
+                {p.id === "annual"
+                  ? `2 months free vs. paying monthly (${annualYearlyEquivalentLabel(currency)}/year). Auto-renews yearly.`
+                  : p.note}
               </p>
               <ul className="space-y-1.5 mb-4">
                 {INCLUDED_FEATURES.map((f) => (
@@ -61,7 +67,7 @@ export default async function BillingRequiredPage() {
                   </li>
                 ))}
               </ul>
-              <SubscribeButton interval={p.id} label={`AED ${p.amountAed}${p.period}`} highlighted={p.highlighted} />
+              <SubscribeButton interval={p.id} label={`${formatBillingAmount(billingPlanAmount(p, currency), currency)}${p.period}`} highlighted={p.highlighted} />
             </div>
           ))}
         </div>

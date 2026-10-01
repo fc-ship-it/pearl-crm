@@ -20,7 +20,7 @@
 //      /api/billing/stripe/portal).
 
 import Stripe from "stripe";
-import { BILLING_PLANS, type BillingIntervalId } from "./domain";
+import { BILLING_PLANS, billingPlanAmount, DEFAULT_CURRENCY, type BillingIntervalId, type CurrencyId } from "./domain";
 import type { SubscriptionStatus } from "./data";
 
 export class StripeNotConfiguredError extends Error {
@@ -39,11 +39,11 @@ function stripe(): Stripe {
   return cached;
 }
 
-/** AED amounts are whole dirhams in our own code (see BILLING_PLANS);
- * Stripe's `unit_amount` is in fils, the smallest AED unit — same
- * "smallest unit" convention as Ziina. */
-function aedToFils(amountAed: number): number {
-  return Math.round(amountAed * 100);
+/** Whole-unit amounts (dirhams or euros — see BILLING_PLANS) to the smallest
+ * currency unit Stripe's `unit_amount` expects (fils/cents) — both AED and
+ * EUR use a 1:100 minor unit, same "smallest unit" convention as Ziina. */
+function toMinorUnits(amount: number): number {
+  return Math.round(amount * 100);
 }
 
 function intervalFromStripe(stripeInterval: string): BillingIntervalId | null {
@@ -69,6 +69,11 @@ function intervalFromStripe(stripeInterval: string): BillingIntervalId | null {
 export async function createSubscriptionCheckout(params: {
   orgId: string;
   interval: BillingIntervalId;
+  /** Which currency to show/charge in Checkout — defaults to AED (the UAE
+   * market) when the caller doesn't know better yet. See CurrencyId in
+   * domain.ts: this only changes presentment currency, never where the
+   * money settles. */
+  currency?: CurrencyId;
   customerEmail?: string;
   successUrl: string;
   cancelUrl: string;
@@ -76,6 +81,7 @@ export async function createSubscriptionCheckout(params: {
 }): Promise<{ url: string }> {
   const plan = BILLING_PLANS.find((p) => p.id === params.interval);
   if (!plan) throw new Error(`Unknown billing interval: ${params.interval}`);
+  const currency = params.currency ?? DEFAULT_CURRENCY;
 
   const session = await stripe().checkout.sessions.create({
     mode: "subscription",
@@ -85,8 +91,8 @@ export async function createSubscriptionCheckout(params: {
       {
         quantity: 1,
         price_data: {
-          currency: "aed",
-          unit_amount: aedToFils(plan.amountAed),
+          currency: currency.toLowerCase(),
+          unit_amount: toMinorUnits(billingPlanAmount(plan, currency)),
           recurring: { interval: plan.stripeInterval },
           product_data: { name: `Pearl CRM — ${plan.label} plan` },
         },
@@ -142,7 +148,7 @@ export async function createFeaturedListingCheckout(params: {
         quantity: 1,
         price_data: {
           currency: "aed",
-          unit_amount: aedToFils(MATCH_FEATURED_PRICE_AED),
+          unit_amount: toMinorUnits(MATCH_FEATURED_PRICE_AED),
           recurring: { interval: MATCH_FEATURED_INTERVAL },
           product_data: { name: "Pearl Business Match — In evidenza" },
         },
@@ -165,6 +171,11 @@ export type NormalizedSubscription = {
   intervalId: BillingIntervalId | null;
   periodEndIso: string | null;
   cancelAtPeriodEnd: boolean;
+  /** Read straight off the Stripe subscription's price — Stripe, not our
+   * own guess, is the source of truth for which currency an org actually
+   * got charged in. Null only if Stripe ever returns a currency we don't
+   * recognize (never happens for a subscription this app created). */
+  currencyId: CurrencyId | null;
 };
 
 const STATUS_MAP: Record<Stripe.Subscription.Status, SubscriptionStatus> = {
@@ -186,6 +197,7 @@ const STATUS_MAP: Record<Stripe.Subscription.Status, SubscriptionStatus> = {
 export function normalizeSubscription(sub: Stripe.Subscription): NormalizedSubscription {
   const item = sub.items.data[0];
   const priceInterval = item?.price?.recurring?.interval;
+  const priceCurrency = item?.price?.currency?.toUpperCase();
   return {
     customerId: typeof sub.customer === "string" ? sub.customer : sub.customer.id,
     subscriptionId: sub.id,
@@ -193,6 +205,7 @@ export function normalizeSubscription(sub: Stripe.Subscription): NormalizedSubsc
     intervalId: priceInterval ? intervalFromStripe(priceInterval) : null,
     periodEndIso: item?.current_period_end ? new Date(item.current_period_end * 1000).toISOString() : null,
     cancelAtPeriodEnd: !!sub.cancel_at_period_end,
+    currencyId: priceCurrency === "AED" || priceCurrency === "EUR" ? priceCurrency : null,
   };
 }
 

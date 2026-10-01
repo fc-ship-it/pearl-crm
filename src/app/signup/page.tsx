@@ -17,10 +17,15 @@ function SignupForm() {
     e.preventDefault();
     setLoading(true);
     setError("");
+    // No account/locale to read yet at this point — infer AED vs. EUR from
+    // the visitor's own browser language instead (an Italian browser gets
+    // EUR pricing on the Stripe Checkout page that follows). Once they're
+    // signed up, this is exactly what their saved language preference does.
+    const currency = typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("it") ? "EUR" : "AED";
     const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orgName, name, email, password }),
+      body: JSON.stringify({ orgName, name, email, password, currency }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.redirect_url) {

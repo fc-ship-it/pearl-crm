@@ -426,6 +426,15 @@ async function initDb(): Promise<void> {
     ["stripe_customer_id", "TEXT"],
     ["stripe_subscription_id", "TEXT"],
     ["stripe_cancel_at_period_end", "INTEGER NOT NULL DEFAULT 0"],
+    // 'AED' | 'EUR' — which currency this org's Stripe subscription is
+    // actually billed in. Null until the first successful Checkout (see
+    // applyStripeSubscription in data.ts, which reads it straight off the
+    // Stripe subscription's price so it's never set independently of what
+    // Stripe actually charges). Once set, every later checkout for this org
+    // keeps using it — see the billing pages — so a customer can never
+    // accidentally flip currency mid-subscription by switching their
+    // display language.
+    ["billing_currency", "TEXT"],
   ]);
   // "Business Match" — an opt-in, org-level directory so Pearl's own paying
   // customers can find each other for B2B opportunities. Deliberately NOT

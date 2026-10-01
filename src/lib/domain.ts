@@ -5,15 +5,42 @@
  * canonical prices and period lengths live here so the pricing page and the
  * Stripe checkout/webhook code can't drift apart. `stripeInterval` is the
  * recurring interval passed straight to Stripe's Checkout Session
- * (`price_data.recurring.interval`) — see src/lib/stripe.ts. */
+ * (`price_data.recurring.interval`) — see src/lib/stripe.ts.
+ *
+ * `amountEur` is a straight AED→EUR conversion (today's approximate rate,
+ * rounded) for selling into the Italian/EU market — Dubai stays the billing
+ * entity and settlement currency either way; this only changes what the
+ * customer sees and is charged in Stripe Checkout (see CurrencyId below).
+ * `amountAed` is kept as the only field the pre-existing Ziina/legacy billing
+ * code (owner dashboard manual grants, the old cron sweep) reads, so none of
+ * that needs to change. */
 export const BILLING_PLANS = [
-  { id: "weekly", label: "Weekly", amountAed: 24, days: 7, period: "/week", stripeInterval: "week", note: "Auto-renews every week — cancel any time.", highlighted: false },
-  { id: "monthly", label: "Monthly", amountAed: 80, days: 30, period: "/month", stripeInterval: "month", note: "Auto-renews every month — cancel any time.", highlighted: true },
-  { id: "annual", label: "Annual", amountAed: 800, days: 365, period: "/year", stripeInterval: "year", note: "2 months free vs. paying monthly (AED 960/year). Auto-renews yearly.", highlighted: false },
+  { id: "weekly", label: "Weekly", amountAed: 24, amountEur: 6, days: 7, period: "/week", stripeInterval: "week", note: "Auto-renews every week — cancel any time.", highlighted: false },
+  { id: "monthly", label: "Monthly", amountAed: 80, amountEur: 20, days: 30, period: "/month", stripeInterval: "month", note: "Auto-renews every month — cancel any time.", highlighted: true },
+  { id: "annual", label: "Annual", amountAed: 800, amountEur: 200, days: 365, period: "/year", stripeInterval: "year", note: "2 months free vs. paying monthly. Auto-renews yearly.", highlighted: false },
 ] as const;
 export type BillingIntervalId = (typeof BILLING_PLANS)[number]["id"];
 export function billingPlanConfig(id: string | null | undefined) {
   return BILLING_PLANS.find((p) => p.id === id) ?? null;
+}
+
+/** The two currencies a customer can be shown/charged in — AED (UAE, the
+ * default) or EUR (Italy/EU market). Everything settles through the same
+ * Dubai Stripe account regardless; this only picks presentment currency. */
+export type CurrencyId = "AED" | "EUR";
+export const DEFAULT_CURRENCY: CurrencyId = "AED";
+export function billingPlanAmount(plan: (typeof BILLING_PLANS)[number], currency: CurrencyId): number {
+  return currency === "EUR" ? plan.amountEur : plan.amountAed;
+}
+export function formatBillingAmount(amount: number, currency: CurrencyId): string {
+  return currency === "EUR" ? `€${amount}` : `AED ${amount}`;
+}
+/** The annual plan's "2 months free" framing needs the monthly-equivalent
+ * yearly cost, which depends on which currency is being shown — computed
+ * here (from the monthly plan) rather than baked into a static string. */
+export function annualYearlyEquivalentLabel(currency: CurrencyId): string {
+  const monthly = BILLING_PLANS.find((p) => p.id === "monthly")!;
+  return formatBillingAmount(billingPlanAmount(monthly, currency) * 12, currency);
 }
 /** Grace period used only for a manually-granted plan (Owner Dashboard →
  * bank transfer / cash) — the true Ziina/Stripe checkout path relies on the

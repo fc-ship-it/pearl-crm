@@ -5,7 +5,10 @@ import type { BillingIntervalId } from "@/lib/domain";
 
 /** Kicks off a Stripe Checkout for one plan and redirects the browser to the
  * hosted payment page. Used on both the Plan & Billing settings page and
- * the /billing-required screen a suspended org lands on. */
+ * the /billing-required screen a suspended org lands on. The currency isn't
+ * passed from here — the API route decides it server-side (the org's
+ * already-billed currency if it has one, otherwise the signed-in user's
+ * saved language) so it can't be tampered with from the client. */
 export default function SubscribeButton({
   interval,
   label,
