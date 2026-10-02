@@ -341,6 +341,25 @@ CREATE TABLE IF NOT EXISTS user_integrations (
   extra TEXT,
   UNIQUE(user_id, provider)
 );
+
+-- A free-access code (e.g. for a test team) entered at signup instead of a
+-- card — see redeemPromoCode in data.ts. Redeeming one skips Stripe Checkout
+-- entirely: the org is created already 'active', billing_period_end set to
+-- now + bonus_days, no stripe_subscription_id ever — which is exactly the
+-- shape the existing grace/suspend cron (listOrgsToMoveToGrace/
+-- listOrgsToSuspend) already expects for a manually-granted org, so it
+-- expires through that same pipeline with no new expiry logic needed.
+-- code is stored upper-cased for case-insensitive matching.
+CREATE TABLE IF NOT EXISTS promo_codes (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  bonus_days INTEGER NOT NULL,
+  note TEXT,
+  max_redemptions INTEGER,
+  redemptions_count INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
 `;
 
 async function columnsOf(table: string): Promise<string[]> {

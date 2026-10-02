@@ -1,7 +1,20 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { db, id as newId } from "@/lib/db";
-import { urgencyScore, urgencyLevel, addressArea, WEEKDAY_LABELS, stageConfig, BILLING_PLANS, BILLING_GRACE_DAYS, type BillingIntervalId } from "@/lib/domain";
+import {
+  urgencyScore,
+  urgencyLevel,
+  addressArea,
+  WEEKDAY_LABELS,
+  stageConfig,
+  BILLING_PLANS,
+  BILLING_GRACE_DAYS,
+  normalizeEmail,
+  normalizePhone,
+  daysSinceLastContact,
+  FOLLOW_UP_STALE_DAYS,
+  type BillingIntervalId,
+} from "@/lib/domain";
 
 // NOTE: every exported function here is `async` now. Under the old
 // node:sqlite driver these were synchronous — but a real network database
@@ -66,6 +79,13 @@ export type ContactFilters = {
    * always have at least one of those fields filled in.
    */
   rawImportsOnly?: boolean;
+  /** True → only contacts that haven't had an interaction (or, if they've
+   * never had one, weren't even created) in the last FOLLOW_UP_STALE_DAYS —
+   * the "needs a follow-up" view. Filtered in JS after the query (not SQL)
+   * since it has to fall back to created_at per-row the same way
+   * daysSinceLastContact does, which COALESCE alone in the ORDER/WHERE
+   * clause would duplicate awkwardly for little benefit at this data size. */
+  staleOnly?: boolean;
 };
 
 export type Campaign = {
@@ -410,7 +430,9 @@ export async function listContacts(orgId: string, filters: ContactFilters = {}, 
        ORDER BY ct.created_at DESC`
     )
     .all(...params);
-  return rows.map(toContact);
+  const contacts = rows.map(toContact);
+  if (!filters.staleOnly) return contacts;
+  return contacts.filter((c) => daysSinceLastContact(c) >= FOLLOW_UP_STALE_DAYS);
 }
 
 /** Same `viewerOwnerId` restriction as listContacts — pass it to make sure a
@@ -430,6 +452,103 @@ export async function getContact(orgId: string, contactId: string, viewerOwnerId
     )
     .get(...params);
   return r ? toContact(r) : null;
+}
+
+export type DuplicateContactGroup = {
+  /** The normalized email/phone the contacts in this group share. */
+  key: string;
+  matchType: "email" | "phone";
+  contacts: Contact[];
+};
+
+/** Groups a contact list into duplicate clusters by normalized email or
+ * normalized phone (see normalizeEmail/normalizePhone in domain.ts) — a
+ * manual data-hygiene pass for whatever's already in the database, distinct
+ * from importContacts' own normalized check, which only prevents NEW
+ * duplicates going forward. Loads the whole org's contacts once; at a few
+ * thousand rows this is trivial for Node to group in memory, and avoids
+ * needing normalized columns/indexes in Postgres just for this.
+ *
+ * `ownerId`, when passed, restricts both the candidate pool and each
+ * returned group to contacts owned by that one teammate — a SALES
+ * teammate's duplicate-finder should never surface, let alone let them
+ * merge, a contact that belongs to someone else. */
+export async function findDuplicateContactGroups(orgId: string, ownerId?: string): Promise<DuplicateContactGroup[]> {
+  const clauses = ["ct.org_id = ?"];
+  const params: any[] = [orgId];
+  if (ownerId) {
+    clauses.push("ct.owner_id = ?");
+    params.push(ownerId);
+  }
+  const rows = await db
+    .prepare(
+      `SELECT ct.*, co.name as company_name,
+              (SELECT COUNT(*) FROM deals d WHERE d.contact_id = ct.id) as deal_count
+       FROM contacts ct LEFT JOIN companies co ON co.id = ct.company_id
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY ct.created_at ASC`
+    )
+    .all(...params);
+  const contacts = (rows as any[]).map(toContact);
+
+  const byEmail = new Map<string, Contact[]>();
+  const byPhone = new Map<string, Contact[]>();
+  for (const c of contacts) {
+    const em = normalizeEmail(c.email);
+    if (em) {
+      if (!byEmail.has(em)) byEmail.set(em, []);
+      byEmail.get(em)!.push(c);
+    }
+    const ph = normalizePhone(c.phone);
+    if (ph) {
+      if (!byPhone.has(ph)) byPhone.set(ph, []);
+      byPhone.get(ph)!.push(c);
+    }
+  }
+
+  const groups: DuplicateContactGroup[] = [];
+  for (const [key, list] of byEmail) if (list.length > 1) groups.push({ key, matchType: "email", contacts: list });
+  for (const [key, list] of byPhone) if (list.length > 1) groups.push({ key, matchType: "phone", contacts: list });
+  // Most-duplicated / oldest first — whichever has the longest history is
+  // the one most worth cleaning up first.
+  groups.sort((a, b) => b.contacts.length - a.contacts.length);
+  return groups;
+}
+
+/** Folds `duplicateIds` into `primaryId`: every deal, activity, task,
+ * meeting and reminder that pointed at one of the duplicates now points at
+ * the primary instead (merging consolidates history — unlike
+ * deleteContacts, which deliberately orphans those rows), the primary picks
+ * up any field it was missing (email/phone/company/address) from whichever
+ * duplicate had it, and the duplicate contact rows are deleted. No-op if
+ * `duplicateIds` is empty or only contains `primaryId` itself. */
+export async function mergeContacts(orgId: string, primaryId: string, duplicateIds: string[]): Promise<void> {
+  const ids = Array.from(new Set(duplicateIds.filter((dupId) => dupId && dupId !== primaryId)));
+  if (ids.length === 0) return;
+
+  const primary = await getContact(orgId, primaryId);
+  if (!primary) return;
+
+  const patch: Record<string, string> = {};
+  for (const dupId of ids) {
+    const dup = await getContact(orgId, dupId);
+    if (!dup) continue;
+    if (!primary.email && !patch.email && dup.email) patch.email = dup.email;
+    if (!primary.phone && !patch.phone && dup.phone) patch.phone = dup.phone;
+    if (!primary.companyId && !patch.company_id && dup.companyId) patch.company_id = dup.companyId;
+    if (!primary.address && !patch.address && dup.address) patch.address = dup.address;
+  }
+  if (Object.keys(patch).length > 0) {
+    const sets = Object.keys(patch)
+      .map((k) => `${k} = ?`)
+      .join(", ");
+    await db.prepare(`UPDATE contacts SET ${sets} WHERE org_id = ? AND id = ?`).run(...Object.values(patch), orgId, primaryId);
+  }
+
+  for (const table of ["deals", "activities", "tasks", "meetings", "custom_alerts"]) {
+    await db.prepare(`UPDATE ${table} SET contact_id = ? WHERE org_id = ? AND contact_id = ANY(?::text[])`).run(primaryId, orgId, ids);
+  }
+  await db.prepare("DELETE FROM contacts WHERE org_id = ? AND id = ANY(?::text[])").run(orgId, ids);
 }
 
 /** Finds a company by exact (case-insensitive) name, or creates one — used for both manual entry and vCard/QR imports that carry an organization name. */
@@ -493,8 +612,40 @@ export async function createContact(orgId: string, input: NewContactInput): Prom
   return (await getContact(orgId, cid))!;
 }
 
-/** Bulk-imports contacts (from a parsed .vcf file); duplicates by exact phone or email are skipped. */
+/** Bulk-imports contacts (from a parsed .vcf file, the native phone Contact
+ * Picker, or anywhere else contacts come in in bulk).
+ *
+ * Duplicates are caught by NORMALIZED phone/email (see normalizeEmail /
+ * normalizePhone in domain.ts), not a raw exact-string match — "Mario@x.com"
+ * vs "mario@x.com", or "+39 333 1234567" vs "3331234567", are the same
+ * person. This is what makes "just re-export your whole phone's address
+ * book and re-upload it" a safe habit rather than a duplicate-generating
+ * one: every contact already in Pearl is recognized and skipped, however
+ * many times the same export gets re-imported, by whoever on the team does
+ * it and on whatever phone/platform they're on — there's no per-provider
+ * sync to set up, which is also why this is the path Pearl uses instead of
+ * a Google/Outlook/iCloud-specific contacts sync (see the "squadra"
+ * decision this was built for: it has to work the same way for everyone,
+ * regardless of which ecosystem their phone's address book lives in).
+ *
+ * The existing-contacts lookup is loaded ONCE up front (not per row) and
+ * updated in memory as rows are imported, so two matching entries in the
+ * SAME import batch (e.g. the same person scanned twice at one event) are
+ * also caught, not just matches against what was already in Pearl. */
 export async function importContacts(orgId: string, contacts: NewContactInput[]): Promise<{ imported: number; skipped: number }> {
+  const existing = (await db.prepare("SELECT email, phone FROM contacts WHERE org_id = ?").all(orgId)) as {
+    email: string | null;
+    phone: string | null;
+  }[];
+  const seenEmails = new Set<string>();
+  const seenPhones = new Set<string>();
+  for (const row of existing) {
+    const em = normalizeEmail(row.email);
+    if (em) seenEmails.add(em);
+    const ph = normalizePhone(row.phone);
+    if (ph) seenPhones.add(ph);
+  }
+
   let imported = 0;
   let skipped = 0;
   for (const c of contacts) {
@@ -502,12 +653,10 @@ export async function importContacts(orgId: string, contacts: NewContactInput[])
       skipped++;
       continue;
     }
-    if (c.phone || c.email) {
-      const dup = (await db
-        .prepare(
-          `SELECT id FROM contacts WHERE org_id = ? AND ((phone IS NOT NULL AND phone = ?) OR (email IS NOT NULL AND email = ?))`
-        )
-        .get(orgId, c.phone || null, c.email || null)) as { id: string } | undefined;
+    const em = normalizeEmail(c.email);
+    const ph = normalizePhone(c.phone);
+    if (em || ph) {
+      const dup = (em && seenEmails.has(em)) || (ph && seenPhones.has(ph));
       if (dup) {
         skipped++;
         continue;
@@ -515,6 +664,8 @@ export async function importContacts(orgId: string, contacts: NewContactInput[])
     }
     await createContact(orgId, { ...c, source: c.source || "import" });
     imported++;
+    if (em) seenEmails.add(em);
+    if (ph) seenPhones.add(ph);
   }
   return { imported, skipped };
 }
@@ -1839,6 +1990,67 @@ export async function grantManualPlan(orgId: string, interval: BillingIntervalId
       `UPDATE organizations SET plan = ?, billing_interval = ?, billing_period_end = ?, subscription_status = 'active', grace_until = NULL WHERE id = ?`
     )
     .run(interval, interval, newEnd, orgId);
+}
+
+export type PromoCode = {
+  id: string;
+  code: string;
+  bonusDays: number;
+  note: string | null;
+  maxRedemptions: number | null;
+  redemptionsCount: number;
+  active: boolean;
+  createdAt: string;
+};
+
+function toPromoCode(r: any): PromoCode {
+  return {
+    id: r.id,
+    code: r.code,
+    bonusDays: r.bonus_days,
+    note: r.note,
+    maxRedemptions: r.max_redemptions,
+    redemptionsCount: r.redemptions_count,
+    active: !!r.active,
+    createdAt: r.created_at,
+  };
+}
+
+export async function listPromoCodes(): Promise<PromoCode[]> {
+  const rows = await db.prepare("SELECT * FROM promo_codes ORDER BY created_at DESC").all();
+  return (rows as any[]).map(toPromoCode);
+}
+
+/** `code` is normalized upper-case so "paola4" and "PAOLA4" are the same
+ * code — matches how {@link redeemPromoCode} looks it up. */
+export async function createPromoCode(input: { code: string; bonusDays: number; note?: string | null; maxRedemptions?: number | null }): Promise<void> {
+  await db
+    .prepare("INSERT INTO promo_codes (id, code, bonus_days, note, max_redemptions, redemptions_count, active, created_at) VALUES (?,?,?,?,?,0,1,?)")
+    .run(newId(), input.code.trim().toUpperCase(), input.bonusDays, input.note?.trim() || null, input.maxRedemptions ?? null, new Date().toISOString());
+}
+
+export async function setPromoCodeActive(codeId: string, active: boolean): Promise<void> {
+  await db.prepare("UPDATE promo_codes SET active = ? WHERE id = ?").run(active ? 1 : 0, codeId);
+}
+
+/** Validates a promo code and — if it's still usable — atomically counts the
+ * redemption, in one UPDATE guarded by the same WHERE clause that did the
+ * validating, so two signups racing on the last remaining use can't both
+ * succeed. Returns the bonus days to grant, or null if the code doesn't
+ * exist, is disabled, or has no redemptions left. Doesn't touch the
+ * organization — see the card-less signup branch in the signup route for
+ * what happens with the returned days. */
+export async function redeemPromoCode(rawCode: string): Promise<{ bonusDays: number } | null> {
+  const code = rawCode.trim().toUpperCase();
+  if (!code) return null;
+  const row = (await db
+    .prepare(
+      `UPDATE promo_codes SET redemptions_count = redemptions_count + 1
+       WHERE code = ? AND active = 1 AND (max_redemptions IS NULL OR redemptions_count < max_redemptions)
+       RETURNING bonus_days`
+    )
+    .get(code)) as { bonus_days: number } | undefined;
+  return row ? { bonusDays: row.bonus_days } : null;
 }
 
 /** `viewerOwnerId`: a SALES teammate gets their own pipeline numbers only;

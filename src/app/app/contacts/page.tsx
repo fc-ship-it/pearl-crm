@@ -3,11 +3,12 @@ import { getSession } from "@/lib/auth";
 import { listContacts } from "@/lib/data";
 import { Plus, Filter } from "lucide-react";
 import ContactsTable from "@/components/ContactsTable";
+import DuplicateContactsPanel from "@/components/DuplicateContactsPanel";
 
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ interest?: string; budgetTier?: string; targetSegment?: string; rawImports?: string }>;
+  searchParams: Promise<{ interest?: string; budgetTier?: string; targetSegment?: string; rawImports?: string; stale?: string }>;
 }) {
   const session = await getSession();
   const sp = await searchParams;
@@ -16,6 +17,7 @@ export default async function ContactsPage({
     budgetTier: sp.budgetTier || undefined,
     targetSegment: sp.targetSegment || undefined,
     rawImportsOnly: sp.rawImports === "1",
+    staleOnly: sp.stale === "1",
   };
   // A "SALES" teammate only ever sees contacts assigned to them; an ADMIN
   // sees the whole org's, same as before Settings -> Team existed.
@@ -23,7 +25,7 @@ export default async function ContactsPage({
   const contacts = await listContacts(session!.orgId, filters, viewerOwnerId);
   const allContacts = await listContacts(session!.orgId, {}, viewerOwnerId);
   const segments = Array.from(new Set(allContacts.map((c) => c.targetSegment).filter(Boolean))) as string[];
-  const hasFilters = !!(filters.interest || filters.budgetTier || filters.targetSegment || filters.rawImportsOnly);
+  const hasFilters = !!(filters.interest || filters.budgetTier || filters.targetSegment || filters.rawImportsOnly || filters.staleOnly);
 
   const inputStyle = { background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" } as const;
 
@@ -45,6 +47,8 @@ export default async function ContactsPage({
         A unified directory with the full history of every interaction. Add contacts manually, by scanning a QR code, or by importing them from your phone.
       </p>
 
+      <DuplicateContactsPanel />
+
       <form className="card p-3 mb-4 flex flex-wrap items-center gap-2" style={{ background: "var(--panel-2)" }}>
         <Filter size={14} color="var(--ink-dim)" />
         <input name="interest" defaultValue={filters.interest} placeholder="Filter by interest…" className="px-3 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
@@ -65,6 +69,10 @@ export default async function ContactsPage({
         <label className="flex items-center gap-1.5 text-xs px-2" style={{ color: "var(--ink-dim)" }} title="No company, interest, budget tier or target segment set — the signature of a raw phone import via the Contact Picker, as opposed to a demo/manually-entered contact.">
           <input type="checkbox" name="rawImports" value="1" defaultChecked={filters.rawImportsOnly} />
           Only phone imports (no company/tags)
+        </label>
+        <label className="flex items-center gap-1.5 text-xs px-2" style={{ color: "var(--ink-dim)" }} title="No interaction (or deal) logged in the last 30 days — including contacts that never had one at all.">
+          <input type="checkbox" name="stale" value="1" defaultChecked={filters.staleOnly} />
+          Needs follow-up (30+ days)
         </label>
         <button type="submit" className="text-xs px-3 py-1.5 rounded-lg" style={{ background: "var(--gold)", color: "var(--ink)" }}>
           Apply

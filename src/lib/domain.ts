@@ -192,6 +192,53 @@ export function relativeDaysLabel(iso: string): string {
   return `${d} days ago`;
 }
 
+/** Number of days since a contact's last interaction, falling back to when
+ * it was created if it has none yet (no deal ever logged against it) — a
+ * contact that's never had a single interaction is exactly the kind that
+ * needs a follow-up nudge, not one the "stale" check should skip. */
+export function daysSinceLastContact(contact: { lastInteractionAt?: string | null; createdAt: string }): number {
+  return daysSince(contact.lastInteractionAt || contact.createdAt);
+}
+
+/** Thresholds for the "needs follow-up" nudge on the Contacts list — picked
+ * to read as "getting cold" vs. "gone cold", not tied to any one sales
+ * cadence. */
+export const FOLLOW_UP_STALE_DAYS = 30;
+export const FOLLOW_UP_VERY_STALE_DAYS = 90;
+
+export type FollowUpUrgency = "fresh" | "stale" | "very_stale";
+
+export function followUpUrgency(days: number): FollowUpUrgency {
+  if (days >= FOLLOW_UP_VERY_STALE_DAYS) return "very_stale";
+  if (days >= FOLLOW_UP_STALE_DAYS) return "stale";
+  return "fresh";
+}
+
+/** Lower-cased, trimmed — the baseline every email comparison in the app
+ * (duplicate detection, import de-duping, the Google/Outlook-style
+ * "is this the same person" check) should use instead of a raw exact-string
+ * match, which treats "Mario@x.com" and "mario@x.com" as different people. */
+export function normalizeEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  const trimmed = email.trim().toLowerCase();
+  return trimmed || null;
+}
+
+/** Strips formatting (spaces, dashes, dots, parentheses) so "+39 333 123
+ * 4567", "0039-333-1234567" and "3331234567" all compare on equal footing
+ * where they reasonably can — deliberately NOT stripping a leading "0"
+ * beyond the "00" international prefix, since Italian landline numbers keep
+ * their leading 0 even in full international form (unlike most countries),
+ * so guessing at it would create false matches more often than it'd catch
+ * real ones. This is a practical normalizer for duplicate-spotting, not a
+ * full E.164 parser. */
+export function normalizePhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/[^\d+]/g, "");
+  if (!digits) return null;
+  return digits.startsWith("00") ? "+" + digits.slice(2) : digits;
+}
+
 export const ACTIVITY_LABELS: Record<string, { label: string; icon: string }> = {
   email: { label: "Email", icon: "mail" },
   call: { label: "Call", icon: "phone" },

@@ -4,7 +4,16 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
-import { formatCurrency, relativeDaysLabel, initials, avatarColor, budgetTierConfig, contactSourceConfig } from "@/lib/domain";
+import {
+  formatCurrency,
+  relativeDaysLabel,
+  initials,
+  avatarColor,
+  budgetTierConfig,
+  contactSourceConfig,
+  daysSinceLastContact,
+  followUpUrgency,
+} from "@/lib/domain";
 import type { Contact } from "@/lib/data";
 import LeadTemperaturePicker from "@/components/LeadTemperaturePicker";
 import DeleteContactButton from "@/components/DeleteContactButton";
@@ -125,6 +134,7 @@ export default function ContactsTable({ contacts }: { contacts: Contact[] }) {
             {rows.map((c) => {
               const tier = budgetTierConfig(c.budgetTier);
               const src = contactSourceConfig(c.source);
+              const urgency = followUpUrgency(daysSinceLastContact(c));
               return (
                 <tr key={c.id} className="hover:bg-white/[0.02]" style={{ borderBottom: "1px solid var(--border)" }}>
                   <td className="px-4 py-3">
@@ -180,8 +190,17 @@ export default function ContactsTable({ contacts }: { contacts: Contact[] }) {
                   <td className="px-4 py-3 font-mono" style={{ color: "var(--gold)" }}>
                     {formatCurrency(c.dealValue || 0)}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap" style={{ color: "var(--ink-dim)" }}>
-                    {c.lastInteractionAt ? relativeDaysLabel(c.lastInteractionAt) : "—"}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5" style={{ color: "var(--ink-dim)" }}>
+                      {urgency !== "fresh" && (
+                        <span
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{ background: urgency === "very_stale" ? "var(--danger, #e5484d)" : "var(--warning, #d4a843)" }}
+                          title={urgency === "very_stale" ? "No interaction in 90+ days — needs follow-up" : "No interaction in 30+ days"}
+                        />
+                      )}
+                      {c.lastInteractionAt ? relativeDaysLabel(c.lastInteractionAt) : "Never contacted"}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <DeleteContactButton contactId={c.id} contactName={c.name} />

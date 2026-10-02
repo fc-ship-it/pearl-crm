@@ -1,8 +1,9 @@
 import Image from "next/image";
-import { listAllOrganizations, listAllUsers, platformStats, listAllSponsors, listFeatureInterest } from "@/lib/data";
+import { listAllOrganizations, listAllUsers, platformStats, listAllSponsors, listFeatureInterest, listPromoCodes } from "@/lib/data";
 import OrgActions from "./OrgActions";
 import LogoutButton from "./LogoutButton";
 import SponsorsPanel from "./SponsorsPanel";
+import PromoCodesPanel from "./PromoCodesPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export default async function OwnerDashboardPage() {
   const orgs = await listAllOrganizations();
   const users = await listAllUsers();
   const sponsors = await listAllSponsors();
+  const promoCodes = await listPromoCodes();
   const interest = await listFeatureInterest();
   const interestCounts = { yes: 0, maybe: 0, no: 0 } as Record<string, number>;
   for (const r of interest) interestCounts[r.answer] = (interestCounts[r.answer] ?? 0) + 1;
@@ -179,6 +181,13 @@ export default async function OwnerDashboardPage() {
             Sponsor Business Match ({sponsors.length})
           </h2>
           <SponsorsPanel sponsors={sponsors} />
+        </section>
+
+        <section>
+          <h2 className="font-display text-base mb-3" style={{ color: "var(--ink)" }}>
+            Codici promozionali ({promoCodes.length})
+          </h2>
+          <PromoCodesPanel codes={promoCodes} />
         </section>
 
         <section>
