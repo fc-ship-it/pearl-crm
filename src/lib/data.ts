@@ -344,19 +344,23 @@ export async function setContactAddress(orgId: string, contactId: string, addres
 
 /**
  * Deletes a contact and everything that only makes sense attached to that
- * contact (its logged activities, its tasks, its meetings, its reminders).
- * Deals are kept but detached (contact_id set to null) rather than deleted,
- * since a deal is a financial record worth preserving even if the contact
- * behind it goes away. All of this has to happen before the DELETE on
- * `contacts` itself, since every one of those tables has a foreign key
- * pointing at it and Postgres (unlike the old SQLite driver) actually
- * enforces that at commit time.
+ * contact (its logged activities, its tasks, its meetings, its reminders,
+ * its photo attachments — including photos attached to its meetings, which
+ * would otherwise block the meeting delete below via their own foreign
+ * key). Deals are kept but detached (contact_id set to null) rather than
+ * deleted, since a deal is a financial record worth preserving even if the
+ * contact behind it goes away — its own attachments go with it untouched.
+ * All of this has to happen before the DELETE on `contacts` itself, since
+ * every one of those tables has a foreign key pointing at it and Postgres
+ * (unlike the old SQLite driver) actually enforces that at commit time.
  */
 export async function deleteContact(orgId: string, contactId: string): Promise<void> {
   await db.prepare("DELETE FROM activities WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
   await db.prepare("DELETE FROM tasks WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
+  await db.prepare("DELETE FROM attachments WHERE org_id = ? AND meeting_id IN (SELECT id FROM meetings WHERE org_id = ? AND contact_id = ?)").run(orgId, orgId, contactId);
   await db.prepare("DELETE FROM meetings WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
   await db.prepare("DELETE FROM custom_alerts WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
+  await db.prepare("DELETE FROM attachments WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
   await db.prepare("UPDATE deals SET contact_id = NULL WHERE org_id = ? AND contact_id = ?").run(orgId, contactId);
   await db.prepare("DELETE FROM contacts WHERE org_id = ? AND id = ?").run(orgId, contactId);
 }
@@ -384,8 +388,12 @@ export async function deleteContacts(orgId: string, contactIds: string[], viewer
   }
   await db.prepare("DELETE FROM activities WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
   await db.prepare("DELETE FROM tasks WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
+  await db
+    .prepare("DELETE FROM attachments WHERE org_id = ? AND meeting_id IN (SELECT id FROM meetings WHERE org_id = ? AND contact_id = ANY(?::text[]))")
+    .run(orgId, orgId, contactIds);
   await db.prepare("DELETE FROM meetings WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
   await db.prepare("DELETE FROM custom_alerts WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
+  await db.prepare("DELETE FROM attachments WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
   await db.prepare("UPDATE deals SET contact_id = NULL WHERE org_id = ? AND contact_id = ANY(?::text[])").run(orgId, contactIds);
   const result = await db.prepare("DELETE FROM contacts WHERE org_id = ? AND id = ANY(?::text[])").run(orgId, contactIds);
   return result.changes;
@@ -516,8 +524,8 @@ export async function findDuplicateContactGroups(orgId: string, ownerId?: string
 }
 
 /** Folds `duplicateIds` into `primaryId`: every deal, activity, task,
- * meeting and reminder that pointed at one of the duplicates now points at
- * the primary instead (merging consolidates history — unlike
+ * meeting, reminder and photo attachment that pointed at one of the
+ * duplicates now points at the primary instead (merging consolidates history — unlike
  * deleteContacts, which deliberately orphans those rows), the primary picks
  * up any field it was missing (email/phone/company/address) from whichever
  * duplicate had it, and the duplicate contact rows are deleted. No-op if
@@ -545,7 +553,7 @@ export async function mergeContacts(orgId: string, primaryId: string, duplicateI
     await db.prepare(`UPDATE contacts SET ${sets} WHERE org_id = ? AND id = ?`).run(...Object.values(patch), orgId, primaryId);
   }
 
-  for (const table of ["deals", "activities", "tasks", "meetings", "custom_alerts"]) {
+  for (const table of ["deals", "activities", "tasks", "meetings", "custom_alerts", "attachments"]) {
     await db.prepare(`UPDATE ${table} SET contact_id = ? WHERE org_id = ? AND contact_id = ANY(?::text[])`).run(primaryId, orgId, ids);
   }
   await db.prepare("DELETE FROM contacts WHERE org_id = ? AND id = ANY(?::text[])").run(orgId, ids);
@@ -1990,6 +1998,155 @@ export async function grantManualPlan(orgId: string, interval: BillingIntervalId
       `UPDATE organizations SET plan = ?, billing_interval = ?, billing_period_end = ?, subscription_status = 'active', grace_until = NULL WHERE id = ?`
     )
     .run(interval, interval, newEnd, orgId);
+}
+
+/** Owner Dashboard manual override — clears an org's locked-in billing
+ * currency, so it goes back to following the admin's saved language (see
+ * resolveUserLocale usage in the billing/signup pages) instead of staying
+ * fixed to whatever it was last billed in. This exists for the handful of
+ * orgs where "once billed, always that currency" (the rule that protects a
+ * real paying customer from their price list silently flipping) is the
+ * wrong behavior — the clearest case being the shared Pearl demo account:
+ * it was billed once in AED during testing, which then locked AED even
+ * after switching the account to Italian to show a prospect EUR pricing.
+ * Safe to use on a real paying customer too (their NEXT checkout just picks
+ * the currency fresh from their language again), but it's meant for
+ * exactly this kind of one-off correction, not routine use. */
+export async function resetOrgBillingCurrency(orgId: string): Promise<void> {
+  await db.prepare("UPDATE organizations SET billing_currency = NULL WHERE id = ?").run(orgId);
+}
+
+// ---- Attachments (site-inspection photos + AI-transcribed handwritten
+// notes, on a contact, deal or meeting) --------------------------------
+
+export type AttachmentKind = "photo" | "note";
+export type AttachmentTranscriptionStatus = "none" | "processing" | "done" | "failed";
+
+export type Attachment = {
+  id: string;
+  orgId: string;
+  contactId: string | null;
+  dealId: string | null;
+  meetingId: string | null;
+  kind: AttachmentKind;
+  fileName: string | null;
+  mimeType: string;
+  dataBase64: string;
+  caption: string | null;
+  transcription: string | null;
+  transcriptionStatus: AttachmentTranscriptionStatus;
+  uploadedBy: string | null;
+  createdAt: string;
+};
+
+function toAttachment(r: any): Attachment {
+  return {
+    id: r.id,
+    orgId: r.org_id,
+    contactId: r.contact_id,
+    dealId: r.deal_id,
+    meetingId: r.meeting_id,
+    kind: r.kind,
+    fileName: r.file_name,
+    mimeType: r.mime_type,
+    dataBase64: r.data_base64,
+    caption: r.caption,
+    transcription: r.transcription,
+    transcriptionStatus: r.transcription_status,
+    uploadedBy: r.uploaded_by,
+    createdAt: r.created_at,
+  };
+}
+
+export type NewAttachmentInput = {
+  contactId?: string | null;
+  dealId?: string | null;
+  meetingId?: string | null;
+  kind: AttachmentKind;
+  fileName?: string | null;
+  mimeType: string;
+  dataBase64: string;
+  caption?: string | null;
+  uploadedBy?: string | null;
+};
+
+/** Exactly one of contactId/dealId/meetingId should be set — enforced at the
+ * database level too (see the CHECK constraint on `attachments` in db.ts),
+ * so a bug here fails loudly instead of silently writing an orphaned row. */
+export async function createAttachment(orgId: string, input: NewAttachmentInput): Promise<Attachment> {
+  const attachmentId = newId();
+  const createdAt = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO attachments (id, org_id, contact_id, deal_id, meeting_id, kind, file_name, mime_type, data_base64, caption, transcription, transcription_status, uploaded_by, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    )
+    .run(
+      attachmentId,
+      orgId,
+      input.contactId || null,
+      input.dealId || null,
+      input.meetingId || null,
+      input.kind,
+      input.fileName || null,
+      input.mimeType,
+      input.dataBase64,
+      input.caption?.trim() || null,
+      null,
+      "none",
+      input.uploadedBy || null,
+      createdAt
+    );
+  return (await getAttachment(orgId, attachmentId))!;
+}
+
+export async function getAttachment(orgId: string, attachmentId: string): Promise<Attachment | null> {
+  const r = await db.prepare("SELECT * FROM attachments WHERE org_id = ? AND id = ?").get(orgId, attachmentId);
+  return r ? toAttachment(r) : null;
+}
+
+/** Pass exactly one of contactId/dealId/meetingId — the caller (the
+ * /api/attachments route) already enforces that and checks the viewer can
+ * actually see that entity before calling this. */
+export async function listAttachments(
+  orgId: string,
+  filter: { contactId?: string; dealId?: string; meetingId?: string }
+): Promise<Attachment[]> {
+  const clauses = ["org_id = ?"];
+  const params: any[] = [orgId];
+  if (filter.contactId) {
+    clauses.push("contact_id = ?");
+    params.push(filter.contactId);
+  }
+  if (filter.dealId) {
+    clauses.push("deal_id = ?");
+    params.push(filter.dealId);
+  }
+  if (filter.meetingId) {
+    clauses.push("meeting_id = ?");
+    params.push(filter.meetingId);
+  }
+  const rows = await db.prepare(`SELECT * FROM attachments WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC`).all(...params);
+  return rows.map(toAttachment);
+}
+
+export async function updateAttachmentTranscription(
+  orgId: string,
+  attachmentId: string,
+  status: AttachmentTranscriptionStatus,
+  text: string | null
+): Promise<void> {
+  await db
+    .prepare("UPDATE attachments SET transcription = ?, transcription_status = ? WHERE org_id = ? AND id = ?")
+    .run(text, status, orgId, attachmentId);
+}
+
+export async function setAttachmentCaption(orgId: string, attachmentId: string, caption: string | null): Promise<void> {
+  await db.prepare("UPDATE attachments SET caption = ? WHERE org_id = ? AND id = ?").run(caption?.trim() || null, orgId, attachmentId);
+}
+
+export async function deleteAttachment(orgId: string, attachmentId: string): Promise<void> {
+  await db.prepare("DELETE FROM attachments WHERE org_id = ? AND id = ?").run(orgId, attachmentId);
 }
 
 export type PromoCode = {

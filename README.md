@@ -35,6 +35,8 @@ Open `http://localhost:3000`. On first run the database creates its schema and s
 | Custom alerts / reminders | **Real**, saved to the database, surfaced on the dashboard when due |
 | Gmail / Google Calendar / Outlook Mail / Outlook Calendar / WhatsApp integrations | **Real** — genuine OAuth (Google, Microsoft) and Cloud API (WhatsApp) once you complete the one-time setup in "Connecting real integrations" below. Gmail and Outlook can both be connected at once, and each is **per-teammate** (see "Team members" below) — WhatsApp is the one shared, org-wide connection. |
 | Plans and billing | **Real** — Ziina payment intents in AED (weekly/monthly/annual), with automatic renewal-link emails and an access gate on non-payment. See `ZIINA_INTEGRATION.md` for setup and design notes. |
+| Photo attachments (contacts, deals, meetings) | **Real** — stored directly in Postgres, no separate storage service needed |
+| AI transcription of photographed handwritten notes | **Real once `ANTHROPIC_API_KEY` is set** (see below) — without it, the photo still saves and the text can be typed in by hand instead |
 
 ### Contact capture: QR codes, device import, manual entry
 
@@ -49,6 +51,17 @@ Every contact keeps a `source` badge (added manually / scanned QR code / WhatsAp
 ### Campaigns & custom alerts
 
 **Campaigns & alerts** in the sidebar lets you draft a targeted WhatsApp or email promotion, matched live against contacts by interest / budget tier / target segment (leave all three blank to match everyone). Saving creates a draft; "Send now" sends a **real** email (via Gmail, or via Outlook Mail if Gmail isn't connected) or WhatsApp message to every matched contact that has an email/phone, once that integration is connected in Settings — contacts missing the needed field, or an integration that isn't connected, are reported back as "skipped" rather than silently failing. If both Gmail and Outlook Mail are connected, Gmail is used for sending (so there's one predictable "from" mailbox rather than picking one at random per contact); either one alone is enough. With nothing connected it behaves exactly as before: a simulated send, with a real audience match, recipient count, and per-contact activity-log entry ("Campaign sent: …"). **Custom alerts** are simple dated reminders that show up as a banner on the dashboard once they're due, alongside the automatic "reactivate today" alerts.
+
+### Site-inspection photos & handwritten note transcription
+
+Every contact, deal and meeting has a **"Foto e appunti"** section: "+ Aggiungi foto" attaches a plain photo (e.g. a site-inspection / "sopralluogo" photo); "+ Trascrivi appunti" is for a photo of a handwritten or paper note, which Pearl transcribes into editable text automatically. On a phone this opens the camera directly; on desktop it's a normal file picker. Every photo is resized/compressed client-side before upload and stored as base64 directly in Postgres — no separate object-storage service to set up.
+
+The transcription itself calls the real Claude API (`claude-haiku-4-5`, which supports image input):
+
+1. Add `ANTHROPIC_API_KEY` to the environment variables (an API key from the [Claude / Anthropic Console](https://console.anthropic.com/)).
+2. Redeploy.
+
+Without that variable set, the photo still saves normally — the transcription box just comes back empty with a "Riprova trascrizione AI" retry link and a note that it isn't configured yet, and the text can be typed in by hand in the same box in the meantime (and edited by hand afterwards too, since OCR of handwriting is never perfect). Nothing needs to be re-uploaded once the key is added — "Riprova" on an existing photo picks it up immediately.
 
 ### Why the meeting minutes don't call a real AI model
 
@@ -162,6 +175,7 @@ The app is a standard Next.js project: it deploys to Vercel, Netlify, or any Nod
    - `OWNER_PASSWORD` — the password for **your** private Owner Dashboard (see below). Without it, the app falls back to a hardcoded dev password (`pearl-owner-dev-password`) — change this before sharing the link with anyone.
    - (optional) `RESEND_API_KEY` and `OWNER_NOTIFY_EMAIL` — see "Getting notified of new signups by email" below.
    - (optional, for real billing) `ZIINA_ACCESS_TOKEN` and `CRON_SECRET` — see `ZIINA_INTEGRATION.md`.
+   - (optional) `ANTHROPIC_API_KEY` — see "Site-inspection photos & handwritten note transcription" above.
 4. Deploy. The database schema and demo data create themselves automatically on first request against `DATABASE_URL` — no separate migration step.
 
 ### Deploying to Vercel

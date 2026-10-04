@@ -6,6 +6,7 @@ import { Mail, Phone, MessageCircle, Users as UsersIcon, StickyNote } from "luci
 import LeadTemperaturePicker from "@/components/LeadTemperaturePicker";
 import ContactAddressEditor from "@/components/ContactAddressEditor";
 import DeleteContactButton from "@/components/DeleteContactButton";
+import AttachmentsPanel from "@/components/AttachmentsPanel";
 
 const ICONS: Record<string, any> = { mail: Mail, phone: Phone, "message-circle": MessageCircle, users: UsersIcon, "sticky-note": StickyNote };
 
@@ -141,6 +142,13 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
             })}
           </div>
         </div>
+      </div>
+
+      <div className="card p-5">
+        <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
+          Foto e appunti
+        </h2>
+        <AttachmentsPanel contactId={contact.id} />
       </div>
     </div>
   );

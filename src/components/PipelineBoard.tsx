@@ -13,7 +13,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, Paperclip } from "lucide-react";
 import Link from "next/link";
 import { STAGES, OPEN_STAGES, formatCurrency, urgencyLevel, urgencyScore, URGENCY_COLORS } from "@/lib/domain";
 import type { Deal } from "@/lib/data";
@@ -155,7 +155,12 @@ function Card({ deal, onMove }: { deal: Deal; onMove: (id: string, stage: string
           <span className="text-xs font-mono" style={{ color: "var(--gold)" }}>
             {formatCurrency(deal.value)}
           </span>
-          <UrgencyBadge deal={deal} />
+          <div className="flex items-center gap-2">
+            <UrgencyBadge deal={deal} />
+            <Link href={`/app/deals/${deal.id}`} aria-label="Foto e dettagli trattativa" title="Foto e dettagli">
+              <Paperclip size={13} color="var(--ink-dim)" />
+            </Link>
+          </div>
         </div>
         {(prevStage || nextStage) && (
           <div className="flex items-center justify-between mt-2 opacity-0 group-hover:opacity-100 transition">

@@ -214,6 +214,14 @@ export function followUpUrgency(days: number): FollowUpUrgency {
   return "fresh";
 }
 
+/** Max raw-byte size accepted for a single attachment photo (see
+ * src/lib/data.ts createAttachment / the /api/attachments route) — checked
+ * server-side against the actual upload, as a backstop. The client resizes
+ * every photo to well under this before sending it (see
+ * AttachmentsPanel.tsx), so a normal phone photo never gets close to it;
+ * this just stops an oversized/unexpected file from ever reaching Postgres. */
+export const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+
 /** Lower-cased, trimmed — the baseline every email comparison in the app
  * (duplicate detection, import de-duping, the Google/Outlook-style
  * "is this the same person" check) should use instead of a raw exact-string

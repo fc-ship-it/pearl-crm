@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { getMeeting } from "@/lib/data";
 import { formatDate, meetingLocationTypeConfig } from "@/lib/domain";
 import { CheckCircle2, MessageSquareWarning, ListChecks, ArrowRight, Users, Video, MapPin } from "lucide-react";
+import AttachmentsPanel from "@/components/AttachmentsPanel";
 
 export default async function MeetingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -60,6 +61,13 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="card p-5">
+        <h2 className="font-display text-sm mb-4" style={{ color: "var(--ink)" }}>
+          Foto e appunti del sopralluogo
+        </h2>
+        <AttachmentsPanel meetingId={meeting.id} />
       </div>
     </div>
   );

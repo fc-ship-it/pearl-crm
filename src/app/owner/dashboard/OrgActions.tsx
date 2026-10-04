@@ -91,6 +91,16 @@ export default function OrgActions({ orgId, currentPlan }: { orgId: string; curr
         >
           ✉ Reinvia email benvenuto
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => call({ action: "reset_currency" })}
+          title="Scollega la valuta di questo account da un eventuale addebito passato, così torna a seguire la lingua impostata — utile per l'account demo dopo un test di pagamento"
+          className="px-2.5 py-1 rounded-lg text-xs font-medium disabled:opacity-50"
+          style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" }}
+        >
+          ↻ Reimposta valuta
+        </button>
       </div>
       {resendMsg && (
         <span className="text-xs" style={{ color: resendMsg.kind === "success" ? "var(--success)" : "var(--danger)" }}>

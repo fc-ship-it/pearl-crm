@@ -360,6 +360,41 @@ CREATE TABLE IF NOT EXISTS promo_codes (
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL
 );
+
+-- Photos attached to a contact, deal or meeting -- site-inspection photos
+-- ("sopralluogo"), or a photographed handwritten/paper note that Pearl
+-- transcribes with AI (kind = 'note'; see transcribeNotePhoto in
+-- src/lib/vision.ts, which needs ANTHROPIC_API_KEY set -- without it the
+-- photo still saves, just without an automatic transcription, and the user
+-- can type the text in by hand instead). Exactly one of contact_id/deal_id/
+-- meeting_id is set per row, enforced below -- a photo always belongs to the
+-- one record it was taken for. Images are stored as base64 directly in
+-- Postgres (data_base64) rather than a separate object-storage service,
+-- consistent with this project's zero-extra-infrastructure approach
+-- elsewhere (see google.ts) -- fine at the volume a CRM's own inspection
+-- photos run at; the client downsizes/compresses every photo before upload
+-- (see AttachmentsPanel.tsx) to keep rows small.
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id),
+  contact_id TEXT REFERENCES contacts(id),
+  deal_id TEXT REFERENCES deals(id),
+  meeting_id TEXT REFERENCES meetings(id),
+  kind TEXT NOT NULL DEFAULT 'photo',
+  file_name TEXT,
+  mime_type TEXT NOT NULL,
+  data_base64 TEXT NOT NULL,
+  caption TEXT,
+  transcription TEXT,
+  transcription_status TEXT NOT NULL DEFAULT 'none',
+  uploaded_by TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  CHECK (
+    (CASE WHEN contact_id IS NOT NULL THEN 1 ELSE 0 END) +
+    (CASE WHEN deal_id IS NOT NULL THEN 1 ELSE 0 END) +
+    (CASE WHEN meeting_id IS NOT NULL THEN 1 ELSE 0 END) = 1
+  )
+);
 `;
 
 async function columnsOf(table: string): Promise<string[]> {

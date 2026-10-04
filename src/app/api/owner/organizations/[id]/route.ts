@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { extendTrial, grantManualPlan, getOrganization, getOrgBillingContactEmail } from "@/lib/data";
+import { extendTrial, grantManualPlan, resetOrgBillingCurrency, getOrganization, getOrgBillingContactEmail } from "@/lib/data";
 import { BILLING_PLANS, type BillingIntervalId } from "@/lib/domain";
 import { sendWelcomeEmail } from "@/lib/notify";
 
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 const VALID_INTERVALS = BILLING_PLANS.map((p) => p.id) as [string, ...string[]];
 
 const schema = z.object({
-  action: z.enum(["extend_trial", "grant_plan", "resend_welcome"]),
+  action: z.enum(["extend_trial", "grant_plan", "resend_welcome", "reset_currency"]),
   days: z.number().int().positive().optional(),
   plan: z.enum(VALID_INTERVALS).optional(),
 });
@@ -32,6 +32,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     await extendTrial(orgId, parsed.data.days ?? 14);
   } else if (parsed.data.action === "grant_plan" && parsed.data.plan) {
     await grantManualPlan(orgId, parsed.data.plan as BillingIntervalId);
+  } else if (parsed.data.action === "reset_currency") {
+    await resetOrgBillingCurrency(orgId);
   } else if (parsed.data.action === "resend_welcome") {
     const org = await getOrganization(orgId);
     if (!org) return NextResponse.json({ error: "Organizzazione non trovata." }, { status: 404 });
