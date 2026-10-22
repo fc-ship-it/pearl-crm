@@ -49,18 +49,22 @@ export default function PromoCodesPanel({ codes }: { codes: PromoCode[] }) {
     }
   }
 
-  async function toggle(id: string, active: boolean) {
+  async function patch(id: string, body: Record<string, unknown>) {
     setBusy(true);
     try {
       await fetch(`/api/owner/promo-codes/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active }),
+        body: JSON.stringify(body),
       });
       router.refresh();
     } finally {
       setBusy(false);
     }
+  }
+
+  function toggle(id: string, active: boolean) {
+    return patch(id, { active });
   }
 
   return (
@@ -185,14 +189,17 @@ export default function PromoCodesPanel({ codes }: { codes: PromoCode[] }) {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      disabled={busy}
-                      onClick={() => toggle(c.id, !c.active)}
-                      className="px-2.5 py-1 rounded-lg text-xs disabled:opacity-50"
-                      style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" }}
-                    >
-                      {c.active ? "Disattiva" : "Riattiva"}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        disabled={busy}
+                        onClick={() => toggle(c.id, !c.active)}
+                        className="px-2.5 py-1 rounded-lg text-xs disabled:opacity-50"
+                        style={{ background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" }}
+                      >
+                        {c.active ? "Disattiva" : "Riattiva"}
+                      </button>
+                      <LimitEditor code={c} busy={busy} onPatch={patch} />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -201,5 +208,51 @@ export default function PromoCodesPanel({ codes }: { codes: PromoCode[] }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Inline "change max uses" + "reset counter" controls for one code. */
+function LimitEditor({
+  code,
+  busy,
+  onPatch,
+}: {
+  code: PromoCode;
+  busy: boolean;
+  onPatch: (id: string, body: Record<string, unknown>) => Promise<void>;
+}) {
+  const [value, setValue] = useState(code.maxRedemptions ? String(code.maxRedemptions) : "");
+  const btn = { background: "var(--panel-2)", border: "1px solid var(--border)", color: "var(--ink)" };
+  return (
+    <>
+      <input
+        type="number"
+        min={1}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="∞"
+        aria-label="Usi massimi"
+        className="w-14 rounded-lg px-2 py-1 text-xs"
+        style={btn}
+      />
+      <button
+        disabled={busy}
+        onClick={() => onPatch(code.id, { maxRedemptions: value ? Number(value) : null })}
+        title="Imposta il numero massimo di usi (vuoto = illimitato)"
+        className="px-2.5 py-1 rounded-lg text-xs disabled:opacity-50"
+        style={btn}
+      >
+        Imposta usi
+      </button>
+      <button
+        disabled={busy || code.redemptionsCount === 0}
+        onClick={() => onPatch(code.id, { resetCount: true })}
+        title="Riporta il contatore degli usi a 0"
+        className="px-2.5 py-1 rounded-lg text-xs disabled:opacity-50"
+        style={btn}
+      >
+        Azzera usi
+      </button>
+    </>
   );
 }

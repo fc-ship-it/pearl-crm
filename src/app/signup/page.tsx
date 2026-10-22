@@ -83,7 +83,7 @@ function SignupForm() {
             <label className="text-xs" style={{ color: "var(--ink-dim)" }}>
               Email
             </label>
-            <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
+            <input type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
           </div>
           <div>
             <label className="text-xs" style={{ color: "var(--ink-dim)" }}>

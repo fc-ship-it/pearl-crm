@@ -19,6 +19,11 @@ import RoiCalculator from "@/components/landing/RoiCalculator";
 import FaqAccordion from "@/components/landing/FaqAccordion";
 import ChatWidget from "@/components/landing/ChatWidget";
 import SegmentTabs from "@/components/landing/SegmentTabs";
+import PromoVideo from "@/components/landing/PromoVideo";
+
+// YouTube ID of the Pearl brand film ("Time for what matters"). The video
+// section renders only when this is set, so the page never shows a broken player.
+const PROMO_VIDEO_ID = "";
 
 // Kept honest and in sync with the FAQ below: Gmail and Calendar are native
 // today, WhatsApp Business connects at go-live (official Meta approval is
@@ -74,6 +79,7 @@ export default function LandingPage() {
             </span>
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm" style={{ color: "var(--ink-dim)" }}>
+            {PROMO_VIDEO_ID && <a href="#film">Film</a>}
             <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
             <a href="#faq">FAQ</a>
@@ -144,6 +150,21 @@ export default function LandingPage() {
           />
         </div>
       </section>
+
+      {/* BRAND FILM */}
+      {PROMO_VIDEO_ID && (
+        <section id="film" className="max-w-[1200px] mx-auto px-5 pb-16">
+          <div className="text-center max-w-[640px] mx-auto mb-8">
+            <span className="text-[10px] uppercase tracking-wide" style={{ color: "var(--gold)" }}>
+              The Pearl film
+            </span>
+            <h2 className="font-display text-2xl mt-2" style={{ color: "var(--ink)" }}>
+              It&apos;s 2026. Cars can fly. Are you still forgetting to call clients back?
+            </h2>
+          </div>
+          <PromoVideo videoId={PROMO_VIDEO_ID} title="Pearl CRM — Time for what matters" />
+        </section>
+      )}
 
       {/* SOCIAL PROOF STRIP — only claims we can actually stand behind;
           no star rating here until there's a real, verifiable score to show */}

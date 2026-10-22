@@ -7,7 +7,10 @@ import { createSessionToken, SESSION_COOKIE } from "@/lib/auth";
 export const runtime = "nodejs";
 
 const schema = z.object({
-  email: z.string().email(),
+  // trim + lowercase first: phone keyboards love to capitalize the first
+  // letter or append a space after autocomplete, and accounts are matched
+  // case-insensitively below.
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
 });
 
@@ -29,7 +32,7 @@ export async function POST(req: NextRequest) {
   }
   const { email, password } = parsed.data;
 
-  const user = (await db.prepare("SELECT * FROM users WHERE email = ?").get(email)) as UserRow | undefined;
+  const user = (await db.prepare("SELECT * FROM users WHERE LOWER(email) = ?").get(email)) as UserRow | undefined;
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return NextResponse.json({ error: "Invalid credentials." }, { status: 401 });
   }

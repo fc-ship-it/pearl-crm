@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 const schema = z.object({
   orgName: z.string().min(2),
   name: z.string().min(2),
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(6),
   // Which plan the card-required trial starts on. Defaults to the
   // highlighted (monthly) plan if the signup form doesn't send one.
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   }
   const { orgName, name, email, password } = parsed.data;
 
-  const existing = await db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  const existing = await db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(email);
   if (existing) {
     return NextResponse.json({ error: "An account with this email already exists." }, { status: 409 });
   }

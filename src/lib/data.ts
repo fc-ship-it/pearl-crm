@@ -1020,7 +1020,7 @@ export async function createTeamMember(
   orgId: string,
   input: { name: string; email: string; password: string; role: TeamRole }
 ): Promise<TeamMember> {
-  const existing = await db.prepare("SELECT id FROM users WHERE email = ?").get(input.email.trim().toLowerCase());
+  const existing = await db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(input.email.trim().toLowerCase());
   if (existing) throw new EmailAlreadyExistsError("An account with this email already exists.");
   const userId = newId();
   const createdAt = new Date().toISOString();
@@ -1089,7 +1089,7 @@ function hashResetToken(rawToken: string): string {
 }
 
 export async function findUserByEmail(email: string): Promise<{ id: string; name: string; deactivatedAt: string | null } | null> {
-  const r = (await db.prepare("SELECT id, name, deactivated_at FROM users WHERE email = ?").get(email.trim().toLowerCase())) as
+  const r = (await db.prepare("SELECT id, name, deactivated_at FROM users WHERE LOWER(email) = ?").get(email.trim().toLowerCase())) as
     | { id: string; name: string; deactivated_at: string | null }
     | undefined;
   return r ? { id: r.id, name: r.name, deactivatedAt: r.deactivated_at } : null;
@@ -2188,6 +2188,22 @@ export async function createPromoCode(input: { code: string; bonusDays: number; 
 
 export async function setPromoCodeActive(codeId: string, active: boolean): Promise<void> {
   await db.prepare("UPDATE promo_codes SET active = ? WHERE id = ?").run(active ? 1 : 0, codeId);
+}
+
+/** Owner Dashboard correction for an already-created code: change its usage
+ * cap (null = unlimited) and/or zero the usage counter — e.g. a one-use code
+ * that got burned by a failed first attempt, or one that needs room for a
+ * second person. Doesn't touch accounts already created with the code. */
+export async function updatePromoCodeLimits(
+  codeId: string,
+  changes: { maxRedemptions?: number | null; resetCount?: boolean }
+): Promise<void> {
+  if (changes.maxRedemptions !== undefined) {
+    await db.prepare("UPDATE promo_codes SET max_redemptions = ? WHERE id = ?").run(changes.maxRedemptions, codeId);
+  }
+  if (changes.resetCount) {
+    await db.prepare("UPDATE promo_codes SET redemptions_count = 0 WHERE id = ?").run(codeId);
+  }
 }
 
 /** Validates a promo code and — if it's still usable — atomically counts the
